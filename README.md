@@ -93,7 +93,7 @@ mkdir -p portal-data portal-reports
 docker compose up -d
 ```
 
-**3. Open [http://localhost:8769](http://localhost:8769).** Settings are saved in `portal-data`; reports and snapshots are saved in `portal-reports`. For Linux accounts with a different user ID, see [folder permissions](docs/deployment.md#folder-permissions).
+**3. Open [http://localhost:8769](http://localhost:8769).** Settings are saved in `portal-data`; reports and snapshots are saved in `portal-reports`. For Linux accounts with a different user ID, see [folder permissions](docs/deployment.md#folder-permissions). For a NAS or another disk, see [custom storage](docs/deployment.md#custom-storage).
 
 **Portal has no built-in login.** This example is for local use; remote access needs HTTPS and authentication in front of the app. See the [setup guide](docs/deployment.md).
 

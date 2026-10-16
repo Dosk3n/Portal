@@ -11,7 +11,7 @@ import zipfile
 
 from library import HTML, MAX_FILES, MAX_UPLOAD, now
 from packages import validate_package
-from safe_files import open_directory
+from safe_files import open_directory, paths_overlap
 
 
 class Submission:
@@ -146,7 +146,7 @@ class Watcher:
                 root=Path(watcher['path'])
                 resolved=root.resolve()
                 for protected in (self.library.data,self.library.reports,self.library.shares):
-                    if resolved.is_relative_to(protected) or protected.is_relative_to(resolved):
+                    if paths_overlap(resolved,protected):
                         raise OSError('Watched folder now overlaps managed storage; import stopped.')
                 if not root.is_dir(): raise OSError('Watched folder is unavailable.')
                 with open_directory(root) as root_fd:

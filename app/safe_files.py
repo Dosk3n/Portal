@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import os
 import errno
+import re
 from pathlib import Path
 import stat
 
@@ -10,6 +11,41 @@ _FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 MAX_PACKAGE_BYTES = 200 * 1024 * 1024
 MAX_PACKAGE_ENTRIES = 2000
 MAX_PACKAGE_DEPTH = 64
+
+
+def _mount_identity(path, mountinfo):
+    """Map bind aliases to the same filesystem-relative path on Linux."""
+    best=None
+    def decode(value):
+        return re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1],8)), value)
+    for line in mountinfo.splitlines():
+        fields=line.split()
+        if len(fields)<6:continue
+        mount=Path(decode(fields[4]))
+        if path.is_relative_to(mount) and (best is None or len(mount.parts)>best[0]):
+            best=(len(mount.parts),fields[2],Path(decode(fields[3]))/path.relative_to(mount))
+    return best[1:] if best else None
+
+
+def paths_overlap(left, right, mountinfo=None):
+    """Detect overlapping paths even through two Docker binds of the same storage."""
+    left=Path(left).resolve();right=Path(right).resolve()
+    if left.is_relative_to(right) or right.is_relative_to(left):return True
+    if mountinfo is None:
+        try:mountinfo=Path('/proc/self/mountinfo').read_text()
+        except OSError:mountinfo=''
+    def identities(path):
+        result=[_mount_identity(path,mountinfo)]
+        # A parent such as /mnt also includes any nested NAS filesystem mounts.
+        for line in mountinfo.splitlines():
+            fields=line.split()
+            if len(fields)<6:continue
+            decode=lambda value: re.sub(r'\\([0-7]{3})',lambda m: chr(int(m[1],8)),value)
+            if Path(decode(fields[4])).is_relative_to(path):
+                result.append((fields[2],Path(decode(fields[3]))))
+        return [item for item in result if item]
+    return any(a[0]==b[0] and (a[1].is_relative_to(b[1]) or b[1].is_relative_to(a[1]))
+               for a in identities(left) for b in identities(right))
 
 
 def _parts(relative):

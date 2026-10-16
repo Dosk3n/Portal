@@ -17,3 +17,7 @@ Package copies sync files and supported directory metadata before successful imp
 The unit/HTTP suite includes deterministic password-rotation/revocation races, symlink swaps, directory-index escapes, special files, growth and resource bounds. Browser suites cover sandbox isolation, packaged assets, password-protected sharing, API access, key rotation and ordinary workflows. See [validation](validation.md).
 
 Report scripts and external resources remain supported inside an opaque-origin sandbox. The app is intended to run as a single instance per database/storage pair. Remote private routes require an authentication proxy; the API key and share access checks are separate. This review does not establish that arbitrary third-party reports or the surrounding host infrastructure are free of vulnerabilities.
+
+## Storage mount aliases
+
+Watcher overlap checks also recognise Docker bind aliases and nested filesystem mounts. A report folder exposed at both `/storage/reports` and another mounted path cannot be added as an inbox through the alternate path.

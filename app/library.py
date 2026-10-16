@@ -23,7 +23,7 @@ from urllib.parse import quote
 
 from metadata import MetadataParser, read_text
 from packages import validate_package
-from safe_files import copy_tree
+from safe_files import copy_tree, paths_overlap
 
 MAX_UPLOAD = 50 * 1024 * 1024
 MAX_EXPANDED = 200 * 1024 * 1024
@@ -333,14 +333,14 @@ class Library:
         if not isinstance(path,str) or not Path(path).is_absolute(): raise ValueError('Use an absolute folder path.')
         root=Path(path).resolve()
         for protected in (self.data,self.reports,self.shares):
-            if root.is_relative_to(protected) or protected.is_relative_to(root):
+            if paths_overlap(root,protected):
                 raise ValueError('A watched folder cannot overlap application data, reports, or shares.')
         if not root.is_dir(): raise ValueError('The watched folder must exist inside the container.')
         watcher_id=str(uuid.uuid4())
         with self.db() as db:
             for row in db.execute('SELECT path FROM watchers'):
                 other=Path(row['path']).resolve()
-                if root.is_relative_to(other) or other.is_relative_to(root):
+                if paths_overlap(root,other):
                     raise ValueError('Watched locations cannot overlap each other.')
             db.execute('INSERT INTO watchers(id,path,enabled) VALUES (?,?,?)',(watcher_id,str(root),bool(enabled)))
         return watcher_id

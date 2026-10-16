@@ -26,6 +26,18 @@ volumes:
 
 Keep both folders when updating or replacing the container. You can change the left-hand paths to use another disk; keep `/data` and `/storage` on the right. An optional `.env` file can set the image, port, public address, user/group IDs and timezone; see [.env.example](../.env.example).
 
+### Custom storage
+
+For a NAS or another disk, change the host side of the reports mount:
+
+```yaml
+volumes:
+  - ./portal-data:/data
+  - /mnt/nas/portal:/storage
+```
+
+Mount the NAS on the Docker host first. Portal still uses `/storage` inside the container, so no `command` override is needed. The database stays in the local `portal-data` folder. Optional watched folders can be mounted separately.
+
 ### Folder permissions
 
 The container runs as user and group `1000` by default. Create the folders before starting Portal so Docker does not create them as root. They must be writable by the container's user.
