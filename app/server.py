@@ -72,10 +72,20 @@ class Handler(BaseHTTPRequestHandler):
     def json(self,data,status=200):self.send(status,json.dumps(data,ensure_ascii=False).encode())
 
     def error(self,status,message):
-        if self.path.startswith('/share/'):
-            self.send(status,('<!doctype html><meta name="viewport" content="width=device-width"><title>Share unavailable</title>'
-                              '<style>body{font:17px/1.7 system-ui;color:#244d40;background:#f8f7f3;margin:12vh auto;padding:24px;max-width:540px}</style>'
-                              '<main><h1>Share unavailable</h1><p>'+escape(message)+'</p></main>').encode(),'text/html; charset=utf-8')
+        path=urlsplit(self.path).path
+        public=path.startswith('/share/')
+        browser=self.command in {'GET','HEAD'} and not path.startswith(('/api','/internal/','/static/'))
+        if public or browser:
+            title='Share unavailable' if public else 'Report unavailable' if path.startswith('/files/') else 'Page unavailable'
+            recovery='<a href="/" target="_top">Back to library</a>' if not public else ''
+            token=path.split('/')[2] if public else ''
+            if public and identifier(token) and status==403:
+                recovery=f'<a href="/share/{token}/" target="_top">Enter the share password</a>'
+            body=('<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                  '<title>'+title+' · Portal</title><style>body{font:17px/1.7 system-ui;color:#244d40;background:#f8f7f3;'
+                  'margin:12vh auto;padding:24px;max-width:540px}a{color:inherit}.brand{font-weight:700}</style>'
+                  '<main><p class="brand">Portal</p><h1>'+title+'</h1><p>'+escape(message)+'</p>'+recovery+'</main></html>')
+            self.send(status,body.encode(),'text/html; charset=utf-8')
         else:self.json({'error':message},status)
 
     def body(self,maximum=16384):
@@ -189,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
                         raise LookupError('Folder not found.')
                 return self.json({'saved':True})
         elif self.command=='DELETE':
+            if suffix.startswith('/reports/') and not api:
+                lib.delete_report(suffix.removeprefix('/reports/'));return self.json({'removed':True})
             if suffix.startswith('/shares/'):
                 lib.revoke(suffix.removeprefix('/shares/'));return self.json({'revoked':True})
             if not api and suffix.startswith('/watchers/'):

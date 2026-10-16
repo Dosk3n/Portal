@@ -14,6 +14,9 @@
   let toastTimer;
   let libraryState;
   let libraryRefreshInFlight=false;
+  let libraryUrl='/';
+  let filtersOpen=false;
+  let renderedUrl='';
   const params = () => new URLSearchParams(location.search);
 
   async function request(path, {method='GET', body, signal}={}) {
@@ -33,7 +36,8 @@
   function heading(title,description,action='') { return `<div class="section-heading"><div><p class="eyebrow">Your personal report library</p><h1>${title}</h1><p>${description}</p></div>${action}</div>`; }
   function errorMessage(error) { return `<p class="error" role="alert">${esc(error.message)}</p>`; }
   function navigate(url,replace=false) {
-    history[replace?'replaceState':'pushState']({},'',url); render();
+    if(location.pathname==='/' || location.pathname==='/index.html')libraryUrl=location.pathname+location.search;
+    history[replace?'replaceState':'pushState']({},'',url); render(true);
   }
   function closeDialog() {dialog.close();dialog.replaceChildren();}
   function openDialog(content) {dialog.innerHTML=content;dialog.showModal();}
@@ -44,7 +48,8 @@
     navigate('/'+(p.size?'?'+p:''));
   }
 
-  async function render() {
+  async function render(focus=false) {
+    renderedUrl=location.pathname+location.search;
     routeController?.abort();routeController=new AbortController();
     libraryState=null;
     const id=++generation;
@@ -60,7 +65,11 @@
       else if(location.pathname==='/shares')await sharesPage(id);
       else if(location.pathname.startsWith('/read/'))await readerPage(id);
       else await libraryPage(id);
-    } catch(error) {if(error.name!=='AbortError' && id===generation)main.innerHTML=`<div class="state-panel"><h3>Couldn’t open this page.</h3>${errorMessage(error)}<button class="primary-button" data-retry>Try again</button></div>`;}
+      if(id===generation){
+        if(focus===true)main.focus({preventScroll:true});
+        if(location.hash)document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+      }
+    } catch(error) {if(error.name!=='AbortError' && id===generation){main.innerHTML=`<div class="state-panel"><h3>Couldn’t open this page.</h3>${errorMessage(error)}<div class="actions"><button class="primary-button" data-retry>Try again</button><a class="secondary-button" href="${esc(libraryUrl)}" data-nav>Back to library</a>${currentReport?'<button class="text-button danger" data-delete-report>Delete</button>':''}</div></div>`;document.body.classList.remove('reader-mode');document.getElementById('header').hidden=false;main.className='page-shell';}}
   }
 
   async function libraryPage(id) {
@@ -70,8 +79,8 @@
     const options=(items,value,label)=>`<option value="">${label}</option>`+items.map(item=>`<option value="${esc(item.name)}"${value===item.name?' selected':''}>${esc(item.name)} (${item.count})</option>`).join('');
     document.title='Report library · Portal';
     main.innerHTML=heading('All your reports. One place.','Research, discoveries, and decisions. Saved for later.','<a class="primary-button" href="/upload" data-nav>+ Add report</a>')+
-      `<div class="search-strip"><form class="search-box" id="search-form" role="search"><label class="sr-only" for="search">Search titles, contents and tags</label><span aria-hidden="true">⌕</span><input type="search" id="search" placeholder="Search titles, contents and tags…" value="${esc(p.get('q')||'')}" autocomplete="off"><kbd>/</kbd></form><button class="filter-toggle" id="filters-toggle" aria-expanded="false" aria-controls="filter-panel">Filters</button></div>
-      <div class="library-layout"><aside class="filter-panel" id="filter-panel"><div class="filter-heading"><h2>Refine your library</h2><button class="text-button" data-reset>Reset</button></div><div class="filter-fields">
+      `<div class="search-strip"><form class="search-box" id="search-form" role="search"><label class="sr-only" for="search">Search titles, contents and tags</label><span aria-hidden="true">⌕</span><input type="search" id="search" placeholder="Search titles, contents and tags…" value="${esc(p.get('q')||'')}" autocomplete="off"><button class="text-button" type="submit">Search</button></form><button class="filter-toggle" id="filters-toggle" aria-expanded="${filtersOpen}" aria-controls="filter-panel">Filters</button></div>
+      <div class="library-layout"><aside class="filter-panel${filtersOpen?' is-open':''}" id="filter-panel"><div class="filter-heading"><h2>Refine your library</h2><button class="text-button" data-reset>Reset</button></div><div class="filter-fields">
       <div class="field"><label for="topic">Collection</label><select id="topic" data-filter="topic">${options(facets.topics,p.get('topic'),'All collections')}</select></div>
       <div class="field"><label for="source">Source</label><select id="source" data-filter="source">${options(facets.sources,p.get('source'),'All sources')}</select></div>
       <div class="field"><label for="tag">Tag</label><select id="tag" data-filter="tag">${options(facets.tags,p.get('tag'),'All tags')}</select></div>
@@ -152,6 +161,7 @@
       <div class="field"><label for="upload-date">Report date</label><input id="upload-date" type="date" name="date" value="${new Date().toLocaleDateString('en-CA')}"></div><div class="field"><label for="upload-tags">Tags</label><input id="upload-tags" name="tags" placeholder="Separate tags with commas"></div></div>
       <p class="help">A ZIP should contain <code>index.html</code> and any assets using relative links. Each upload creates a new private report.</p><div class="actions"><button class="primary-button" type="submit">Import report</button><a class="text-button" data-nav href="/">Back to library</a></div><div id="upload-status" class="sr-status" role="status"></div></form>`;
     const zone=document.getElementById('drop-zone');
+    zone.addEventListener('click',event=>{if(event.target.id!=='upload-file')document.getElementById('upload-file').click();});
     zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('is-dragging');});
     zone.addEventListener('dragleave',()=>zone.classList.remove('is-dragging'));
     zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('is-dragging');chooseFile(e.dataTransfer.files[0]);});
@@ -159,26 +169,34 @@
   function chooseFile(file) {selectedFile=file;document.getElementById('file-details').textContent=file?`${file.name} · ${(file.size/1024).toFixed(0)} KB`:'';}
   async function upload(event) {
     event.preventDefault();const form=event.target,status=document.getElementById('upload-status');
-    if(!selectedFile){status.textContent='Choose a report first.';return;}
+    status.classList.remove('error');
+    if(!selectedFile){status.classList.add('error');status.textContent='Choose a report first.';return;}
     const body=new FormData(form);body.set('file',selectedFile);
     const button=form.querySelector('[type=submit]');button.disabled=true;status.textContent='Importing your report…';
     try {const report=await request('/reports',{method:'POST',body});toast('Report saved to your library.');navigate(report.reader_url);}
-    catch(error){status.textContent=error.message;button.disabled=false;}
+    catch(error){status.classList.add('error');status.textContent=error.message;button.disabled=false;}
   }
 
   async function readerPage(id) {
     const r=await request('/reports/'+encodeURIComponent(location.pathname.split('/')[2]),{signal:routeController.signal});if(id!==generation)return;
     currentReport=r;document.title=r.title+' · Portal';
-    main.innerHTML=`<div class="reader-toolbar"><a class="reader-backlink" data-nav href="/">← Library</a><div class="reader-info"><h1>${esc(r.title)}</h1><p>${esc(r.topic)} · ${esc(r.source)} · ${esc(r.date)}</p></div><button class="primary-button" data-new-share>Share externally</button><a class="secondary-button" href="${esc(r.url)}" target="_blank" rel="noopener">Open ↗</a></div><iframe class="reader-frame" id="report-frame" title="${esc(r.title)}" sandbox="allow-scripts allow-forms allow-downloads allow-popups allow-modals" src="${esc(r.url)}"></iframe>`;
+    const available=await fetch(r.url,{method:'HEAD',signal:routeController.signal});
+    if(id!==generation)return;
+    if(!available.ok)throw new Error('This report’s files are unavailable. Check report storage, then try again.');
+    main.innerHTML=`<div class="reader-toolbar"><a class="reader-backlink" data-nav href="${esc(libraryUrl)}">← Library</a><div class="reader-info"><h1>${esc(r.title)}</h1><p>${esc(r.topic)} · ${esc(r.source)} · ${esc(r.date)}</p></div><button class="text-button danger" data-delete-report>Delete</button><button class="primary-button" data-new-share>Share externally</button><a class="secondary-button" href="${esc(r.url)}" target="_blank" rel="noopener">Open ↗</a></div><iframe class="reader-frame" id="report-frame" title="${esc(r.title)}" sandbox="allow-scripts allow-forms allow-downloads allow-popups allow-modals" src="${esc(r.url)}"></iframe>`;
   }
 
   async function settingsPage(id) {
     settings=await request('/settings',{signal:routeController.signal});if(id!==generation)return;
     document.title='Settings · Portal';
     main.innerHTML=heading('Make yourself at home.','Manage agent access and optional folder imports.')+`<div class="settings-layout"><section class="panel"><h2>API access</h2><p>Use this key to submit reports from your agents and other computers. The API is available at <code>${esc(location.origin)}/api</code>.</p><div class="key-row"><input id="api-key" type="password" readonly autocomplete="off" aria-label="API key" value="${esc(settings.api_key)}"><button class="secondary-button" data-reveal>Show</button><button class="secondary-button" data-copy-key>Copy key</button><button class="secondary-button" data-rotate>Regenerate</button></div><p class="help">Regenerating immediately disconnects clients using the old key. <a href="/settings#api-guide" id="api-guide-link">Agent submission example ↓</a></p></section>
-      <section class="panel"><h2>Folder imports</h2><p>Consume completed HTML files, ZIP bundles, or report folders from locations you choose. Successful imports remove the incoming submission; failures stay in place.</p><label class="toggle-row"><input type="checkbox" id="watching-enabled" ${settings.watching_enabled?'checked':''}>Enable folder watching</label><p class="help">Checks every 5 seconds; waits for files to remain unchanged for at least 10 seconds. For HTML with assets, put the entire submission in its own folder. Mounted NAS folders are reconciled through these scans.</p><div id="watchers">${settings.watchers.map(w=>`<div class="watch-row"><p class="watch-path">${esc(w.path)}</p><p class="watch-status">${w.enabled?'Enabled':'Paused'} · Last checked: ${w.last_checked?esc(date(w.last_checked)):'Not yet'}${w.last_import?' · Last import: '+esc(date(w.last_import)):''}</p>${w.error?`<p class="error">${esc(w.error)}</p>`:''}<div class="actions"><button class="secondary-button" data-watch-toggle="${w.id}" data-enabled="${!w.enabled}">${w.enabled?'Pause':'Enable'}</button><button class="text-button" data-watch-remove="${w.id}">Remove location</button></div></div>`).join('')||'<p class="help">No folders configured. API and manual uploads work independently.</p>'}</div><form id="watch-form" class="watch-edit"><div class="field"><label for="watch-path">Add a folder inside the container</label><input id="watch-path" name="path" placeholder="/mnt/reports/inbox" required></div><div class="actions"><button class="secondary-button">Add location</button></div><p class="help">To change a location, remove it and add the new path. Existing reports are preserved.</p><p id="watch-error" class="error" role="alert"></p></form></section>
+      <section class="panel"><h2>Folder imports</h2><p>Consume completed HTML files, ZIP bundles, or report folders from locations you choose. Successful imports remove the incoming submission; failures stay in place.</p><label class="toggle-row"><input type="checkbox" id="watching-enabled" ${settings.watching_enabled?'checked':''}>Enable folder watching</label><p class="help">Checks every 5 seconds; waits for files to remain unchanged for at least 10 seconds. For HTML with assets, put the entire submission in its own folder. Mounted NAS folders are reconciled through these scans.</p><button class="secondary-button" type="button" data-refresh-watchers>Refresh activity</button><div id="watchers">${settings.watchers.map(w=>`<div class="watch-row"><p class="watch-path">${esc(w.path)}</p><p class="watch-status">${!settings.watching_enabled?'Paused (watching is off)':w.enabled?'Enabled':'Paused'} · Last checked: ${w.last_checked?esc(date(w.last_checked)):'Not yet'}${w.last_import?' · Last import: '+esc(date(w.last_import)):''}</p>${w.error?`<p class="error">${esc(w.error)}</p>`:''}<div class="actions"><button class="secondary-button" data-watch-toggle="${w.id}" data-enabled="${!w.enabled}">${w.enabled?'Pause':'Enable'}</button><button class="text-button" data-watch-remove="${w.id}">Remove location</button></div></div>`).join('')||'<p class="help">No folders configured. API and manual uploads work independently.</p>'}</div>${watchActivity(settings.activity)}<form id="watch-form" class="watch-edit"><div class="field"><label for="watch-path">Add a folder inside the container</label><input id="watch-path" name="path" placeholder="/mnt/reports/inbox" required></div><div class="actions"><button class="secondary-button">Add location</button></div><p class="help">To change a location, remove it and add the new path. Existing reports are preserved.</p><p id="watch-error" class="error" role="alert"></p></form></section>
       <section class="panel"><h2>Storage</h2><p>Storage mounts are configured at deployment. The database and settings stay separate from report files.</p><p class="storage-line">Reports: ${esc(settings.storage)}/reports</p><p class="storage-line">Snapshots: ${esc(settings.storage)}/shares</p></section>
       <section class="panel" id="api-guide"><h2>Send a report from an agent</h2><p>Upload one report per request. Optional fields include title, source, topic, date, and comma-separated tags.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin-top:18px">curl -X POST '${esc(location.origin)}/api/reports' \\\n  -H 'X-Api-Key: YOUR_API_KEY' \\\n  -F 'file=@report.zip' \\\n  -F 'topic=Research' \\\n  -F 'source=Agent' \\\n  -F 'tags=ideas,comparison'</pre><p class="help">The response includes a private reader link. Creating a public share is a separate action. API documentation is available at <code>/api/docs</code> with the same key.</p></section></div>`;
+  }
+
+  function watchActivity(activity=[]) {
+    return '<div id="watch-activity"><h3>Recent imports</h3>'+ (activity.length?activity.map(a=>`<p>${esc(date(a.created_at))} · ${esc(a.outcome)} · ${esc(a.filename)} · <a data-nav href="/read/${esc(a.report_id)}">View report</a></p>`).join(''):'<p class="help">No imports yet.</p>')+'</div>';
   }
 
   async function sharesPage(id) {
@@ -202,6 +220,7 @@
     const button=form.querySelector('[type=submit]');button.disabled=true;
     try {
       const share=await request('/shares'+(token?'/'+token:''),{method:token?'PATCH':'POST',body});
+      if(location.pathname==='/shares')await sharesPage(generation);
       openDialog(dialogTop(token?'Share updated':'Your snapshot is ready')+`<p class="dialog-copy">${token?'The existing link now uses your selected snapshot and access settings.':'Your report remains private in the library. This link opens its independent snapshot.'}</p><input class="share-url" aria-label="Created share URL" readonly value="${esc(location.origin+share.url)}"><div class="actions"><button class="primary-button" data-copy-share="${esc(share.url)}">Copy link</button><button class="secondary-button" data-close>Done</button><a href="/shares" class="text-button" data-nav>Manage shares</a></div>`);
     }catch(error){document.getElementById('share-error').textContent=error.message;button.disabled=false;}
   }
@@ -216,8 +235,11 @@
       if(target.hasAttribute('data-retry'))render();
       if(target.hasAttribute('data-reset'))navigate('/');
       if(target.dataset.page){const p=params();p.set('page',target.dataset.page);navigate('/?'+p);}
-      if(target.id==='filters-toggle'){const expanded=target.getAttribute('aria-expanded')!=='true';target.setAttribute('aria-expanded',expanded);document.getElementById('filter-panel').classList.toggle('is-open',expanded);}
+      if(target.id==='filters-toggle'){const expanded=target.getAttribute('aria-expanded')!=='true';filtersOpen=expanded;target.setAttribute('aria-expanded',expanded);document.getElementById('filter-panel').classList.toggle('is-open',expanded);}
       if(target.hasAttribute('data-new-share'))shareForm();
+      if(target.hasAttribute('data-delete-report'))openDialog(dialogTop('Delete this report?')+'<p class="dialog-copy">This removes the report and its files from your library. Existing shared snapshots remain available.</p><div class="actions"><button class="primary-button" data-confirm-delete>Delete report</button><button class="secondary-button" data-close>Cancel</button></div>');
+      if(target.hasAttribute('data-confirm-delete')){await request('/reports/'+currentReport.id,{method:'DELETE'});toast('Report deleted. Shared snapshots are preserved.');navigate(libraryUrl);}
+      if(target.hasAttribute('data-refresh-watchers')){await settingsPage(generation);toast('Watcher activity refreshed.');}
       if(target.hasAttribute('data-reveal')){const input=document.getElementById('api-key');input.type=input.type==='password'?'text':'password';target.textContent=input.type==='password'?'Show':'Hide';}
       if(target.hasAttribute('data-copy-key'))await copy(settings.api_key);
       if(target.hasAttribute('data-rotate'))openDialog(dialogTop('Regenerate API key?')+'<p class="dialog-copy">Every client using the current key will stop working until you update it. Your reports and share links are preserved.</p><div class="actions"><button class="primary-button" data-confirm-rotate>Regenerate key</button><button class="secondary-button" data-close>Cancel</button></div>');
@@ -242,7 +264,7 @@
     if(el.dataset.filter)filters({[el.dataset.filter]:el.value});
     if(el.id==='upload-file')chooseFile(el.files[0]);
     if(el.id==='share-days')document.getElementById('custom-days-field').hidden=el.value!=='custom';
-    if(el.id==='watching-enabled'){try{await request('/settings',{method:'PATCH',body:{watching_enabled:el.checked}});toast(el.checked?'Folder watching enabled.':'Folder watching disabled.');}catch(error){el.checked=!el.checked;toast(error.message);}}
+    if(el.id==='watching-enabled'){try{await request('/settings',{method:'PATCH',body:{watching_enabled:el.checked}});toast(el.checked?'Folder watching enabled.':'Folder watching disabled.');await settingsPage(generation);}catch(error){el.checked=!el.checked;toast(error.message);}}
   });
   let pickerRequest=0;
   document.addEventListener('input',event=>{
@@ -252,7 +274,7 @@
     }
   });
   document.addEventListener('keydown',event=>{if(event.key==='/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName) && document.getElementById('search')){event.preventDefault();document.getElementById('search').focus();}});
-  window.addEventListener('popstate',render);
+  window.addEventListener('popstate',()=>{if(renderedUrl!==location.pathname+location.search)render(true);});
   setInterval(refreshLibrary,30000);
   render();
 })();

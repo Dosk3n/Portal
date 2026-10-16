@@ -22,6 +22,7 @@ import zipfile
 from urllib.parse import quote
 
 from metadata import MetadataParser, read_text
+from packages import validate_package
 
 MAX_UPLOAD = 50 * 1024 * 1024
 MAX_EXPANDED = 200 * 1024 * 1024
@@ -72,6 +73,9 @@ class Library:
                 CREATE TABLE IF NOT EXISTS watch_imports(
                     path TEXT NOT NULL, digest TEXT NOT NULL, report_id TEXT NOT NULL,
                     PRIMARY KEY(path,digest));
+                CREATE TABLE IF NOT EXISTS watch_activity(
+                    id INTEGER PRIMARY KEY, watcher_id TEXT NOT NULL, created_at TEXT NOT NULL,
+                    filename TEXT NOT NULL, outcome TEXT NOT NULL, report_id TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS watchers(
                     id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL,
                     last_checked TEXT, last_import TEXT, error TEXT NOT NULL DEFAULT '');
@@ -103,8 +107,9 @@ class Library:
     def settings(self):
         with self.db() as db:
             watchers = [dict(r) for r in db.execute('SELECT * FROM watchers ORDER BY path')]
+            activity = [dict(r) for r in db.execute('SELECT * FROM watch_activity ORDER BY id DESC LIMIT 20')]
         return {'api_key': self.setting('api_key'), 'watching_enabled':self.setting('watching_enabled'),
-                'watchers':watchers,'storage':str(self.storage),'max_upload_mb':MAX_UPLOAD//1024//1024}
+                'watchers':watchers,'activity':activity,'storage':str(self.storage),'max_upload_mb':MAX_UPLOAD//1024//1024}
 
     def report(self, report_id):
         with self.db() as db:
@@ -199,6 +204,7 @@ class Library:
         with self.lock, tempfile.TemporaryDirectory(prefix='.import-',dir=self.reports) as temporary:
             stage=Path(temporary)
             entry=self.extract(payload,filename,stage)
+            validate_package(stage,entry)
             parser=MetadataParser(); parser.feed(read_text(stage/entry)); parser.close()
             parsed=parser.result()
             title=str(metadata.get('title') or parsed['title'] or Path(filename).stem).strip()[:500]
@@ -219,7 +225,7 @@ class Library:
                                (report_id,title,source,topic,date,now(),parsed['excerpt'],parsed['body'],entry,size,json.dumps(tags)))
                     db.execute('INSERT INTO reports_fts VALUES (?,?,?,?)',(report_id,title,parsed['body'],' '.join(tags)))
                     if watch_identity:
-                        db.execute('INSERT INTO watch_imports VALUES (?,?,?)',(*watch_identity,report_id))
+                        db.execute('INSERT OR REPLACE INTO watch_imports VALUES (?,?,?)',(*watch_identity,report_id))
             except Exception:
                 shutil.rmtree(destination,ignore_errors=True)
                 raise
@@ -258,7 +264,9 @@ class Library:
     def save_share(self,params,token=None):
         with self.lock:
             previous=self.share(token,True) if token else None
-            report=self.report(params.get('report_id') or (previous or {}).get('report_id'))
+            reuse=previous and params.get('report_id',previous['report_id'])==previous['report_id']
+            report=({'id':previous['report_id'],'title':previous['title'],'entry':previous['entry']} if reuse
+                    else self.report(params.get('report_id')))
             expires=previous['expires_at'] if previous else None
             if 'expires_in_days' in params:
                 days=params['expires_in_days']
@@ -271,7 +279,9 @@ class Library:
             version=str(uuid.uuid4())
             destination=self.shares/token/version
             try:
-                shutil.copytree(self.reports/report['id'],destination)
+                source=self.shares/token/previous['version'] if reuse else self.reports/report['id']
+                shutil.copytree(source,destination)
+                validate_package(destination,report['entry'])
                 with self.db() as db:
                     db.execute('INSERT OR REPLACE INTO shares VALUES (?,?,?,?,?,?,?,?,?)',
                                (token,report['id'],report['title'],version,report['entry'],previous['created_at'] if previous else now(),now(),expires,password))
@@ -282,6 +292,17 @@ class Library:
             if previous:
                 shutil.rmtree(self.shares/token/previous['version'],ignore_errors=True)
             return self.public_share(self.share(token,True))
+
+    def delete_report(self,report_id):
+        with self.lock:
+            self.report(report_id)
+            # Remove files first: a storage failure leaves the catalogue recoverable.
+            folder=self.reports/report_id
+            if folder.exists(): shutil.rmtree(folder)
+            with self.db() as db:
+                db.execute('DELETE FROM reports WHERE id=?',(report_id,))
+                db.execute('DELETE FROM reports_fts WHERE id=?',(report_id,))
+                db.execute('DELETE FROM watch_imports WHERE report_id=?',(report_id,))
 
     def revoke(self,token):
         with self.lock,self.db() as db:

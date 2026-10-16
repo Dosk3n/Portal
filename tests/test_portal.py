@@ -188,7 +188,9 @@ class PortalTests(unittest.TestCase):
         share=self.lib.save_share({'report_id':self.report['id']})
         import shutil
         shutil.rmtree(self.lib.reports/self.report['id'])
-        with self.assertRaises(OSError):self.lib.save_share({},share['token'])
+        replacement=self.lib.import_report(b'<h1>Replacement</h1>','replacement.html')
+        (self.lib.reports/replacement['id']/'index.html').unlink()
+        with self.assertRaises(OSError):self.lib.save_share({'report_id':replacement['id']},share['token'])
         self.assertEqual(self.request(share['url']+'files/index.html')[0],200)
 
     def test_zip_symlinks_duplicate_paths_and_resource_limits(self):
@@ -229,6 +231,64 @@ class PortalTests(unittest.TestCase):
         for _ in range(10):
             self.request(share['url']+'unlock','POST','password=incorrect',{'Content-Type':'application/x-www-form-urlencoded'})
         self.assertEqual(self.request(share['url']+'unlock','POST','password=example',{'Content-Type':'application/x-www-form-urlencoded'})[0],429)
+
+
+    def test_empty_and_missing_dependencies_are_rejected_atomically(self):
+        for payload,name in [(b'  ', 'empty.html'), (bundle({'index.html':'<h1>Report</h1><img src="missing.png">'}),'missing.zip'),
+                             (bundle({'index.html':'<link rel="stylesheet" href="style.css">','style.css':'body{background:url(missing.png)}'}),'style.zip')]:
+            status,_,body=self.api('/reports','POST',payload,headers={'Content-Type':'application/zip' if name.endswith('.zip') else 'text/html'})
+            self.assertEqual(status,400,body)
+        self.assertEqual(self.lib.search({})['total'],1)
+        self.lib.import_report(b'<h1>Remote</h1><img src="https://example.com/image.png"><script>const example="url(fake.png)";</script>','remote.html')
+
+    def test_missing_entry_cannot_publish_and_browser_errors_recover(self):
+        (self.lib.reports/self.report['id']/'index.html').unlink()
+        self.assertEqual(self.api('/shares','POST',{'report_id':self.report['id']})[0],503)
+        self.assertEqual(self.lib.list_shares(),[])
+        for path in [self.report['url'],'/does-not-exist']:
+            status,headers,body=self.request(path)
+            self.assertEqual(status,404)
+            self.assertIn('text/html',headers['Content-Type'])
+            self.assertIn(b'Back to library',body)
+        self.assertIn('application/json',self.api('/missing')[1]['Content-Type'])
+
+    def test_expired_session_offers_password_recovery(self):
+        share=self.lib.save_share({'report_id':self.report['id'],'password':'example'})
+        session=self.lib.unlock(share['token'],'example')
+        with self.lib.db() as db: db.execute('DELETE FROM share_sessions')
+        status,_,body=self.request(share['url']+'session/'+session+'/files/index.html')
+        self.assertEqual(status,403)
+        self.assertIn(('href="'+share['url']+'"').encode(),body)
+        self.assertIn(b'Enter the share password',body)
+
+    def test_watched_duplicate_activity_and_missing_original_reimport(self):
+        inbox=self.base/'inbox';inbox.mkdir();path=inbox/'report.html';payload=b'<h1>Repeated input</h1>'
+        self.lib.add_watcher(str(inbox));self.lib.set_setting('watching_enabled',True)
+        watcher=Watcher(self.lib,stable_seconds=0)
+        def submit():
+            path.write_bytes(payload);watcher.scan();watcher.scan()
+            self.assertFalse(path.exists())
+        submit();submit()
+        self.assertEqual(self.lib.search({'q':'Repeated'})['total'],1)
+        activity=self.lib.settings()['activity'][0]
+        self.assertEqual(activity['outcome'],'Duplicate skipped')
+        (self.lib.reports/activity['report_id']/'index.html').unlink()
+        submit()
+        self.assertEqual(self.lib.search({'q':'Repeated'})['total'],2)
+        self.assertEqual(self.lib.settings()['activity'][0]['outcome'],'Imported')
+        path=inbox/'different.html';submit()
+        self.assertEqual(self.lib.search({'q':'Repeated'})['total'],3)
+
+    def test_delete_preserves_shares_and_access_edits(self):
+        share=self.lib.save_share({'report_id':self.report['id']})
+        endpoint='/internal/reports/'+self.report['id']
+        self.assertEqual(self.request(endpoint,'DELETE')[0],403)
+        self.assertEqual(self.request(endpoint,'DELETE',headers={'X-Portal-Request':'1'})[0],200)
+        self.assertEqual(self.lib.search({})['total'],0)
+        self.assertFalse((self.lib.reports/self.report['id']).exists())
+        self.assertEqual(self.request(share['url']+'files/index.html')[0],200)
+        self.lib.save_share({'password':'updated'},share['token'])
+        self.assertTrue(self.lib.share(share['token'])['password'])
 
 
 if __name__=='__main__':unittest.main()

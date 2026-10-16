@@ -48,6 +48,7 @@ jobs:
           export CHROMIUM_PATH="$(node -e "console.log(require('playwright').chromium.executablePath())")"
           node tests/browser.cjs
           node tests/refresh.cjs
+          node tests/audit-regressions.cjs
       - name: Stop isolated app
         if: always()
         run: docker compose down

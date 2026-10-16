@@ -7,6 +7,7 @@ import time
 import zipfile
 
 from library import HTML, MAX_UPLOAD, now
+from packages import validate_package
 
 
 class Watcher:
@@ -87,9 +88,18 @@ class Watcher:
                         with self.library.lock:
                             with self.library.db() as db:
                                 enabled=db.execute('SELECT enabled FROM watchers WHERE id=?',(watcher['id'],)).fetchone()
-                                exists=db.execute('SELECT 1 FROM watch_imports WHERE path=? AND digest=?',identity).fetchone()
+                                exists=db.execute('SELECT report_id FROM watch_imports WHERE path=? AND digest=?',identity).fetchone()
                             if not enabled or not enabled[0] or not self.library.setting('watching_enabled'):continue
-                            if not exists:self.library.import_report(payload,filename,{'source':'Watched folder'},identity)
+                            duplicate=False
+                            if exists:
+                                try:
+                                    report=self.library.report(exists['report_id'])
+                                    validate_package(self.library.reports/report['id'],report['entry'])
+                                    duplicate=True
+                                except (LookupError,OSError,ValueError):
+                                    pass
+                            if not duplicate:
+                                report=self.library.import_report(payload,filename,{'source':'Watched folder'},identity)
                             current=self.files(candidate)
                             if current!=files or any(p.read_bytes()!=body for p,body in contents.items()):
                                 raise ValueError('Input changed during import; original retained.')
@@ -97,7 +107,11 @@ class Watcher:
                             if candidate.is_dir():
                                 for directory in sorted((p for p in candidate.rglob('*') if p.is_dir()),key=lambda p:len(p.parts),reverse=True):directory.rmdir()
                                 candidate.rmdir()
-                            imported=True
+                            with self.library.db() as db:
+                                db.execute('INSERT INTO watch_activity(watcher_id,created_at,filename,outcome,report_id) VALUES (?,?,?,?,?)',
+                                           (watcher['id'],now(),candidate.name,'Duplicate skipped' if duplicate else 'Imported',report['id']))
+                                db.execute('DELETE FROM watch_activity WHERE id NOT IN (SELECT id FROM watch_activity ORDER BY id DESC LIMIT 100)')
+                            imported=imported or not duplicate
                             self.observed.pop(key,None)
                     except (OSError,ValueError,zipfile.BadZipFile) as exc:
                         error=f'{candidate.name}: {exc}'
