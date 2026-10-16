@@ -25,8 +25,7 @@ class StorageAliasTests(unittest.TestCase):
         self.assertFalse(paths_overlap('/different/reports','/storage/reports',self.mounts))
 
     def test_mount_paths_with_spaces_are_decoded(self):
-        mounts=self.mounts+r'
-4 1 0:55 /Media/Portal /mounted\040portal rw - fuse.mergerfs mergerfs rw'.replace('\\n','\n')
+        mounts=self.mounts + '\n' + r'4 1 0:55 /Media/Portal /mounted\040portal rw - fuse.mergerfs mergerfs rw'
         self.assertTrue(paths_overlap('/mounted portal/reports','/storage/reports',mounts))
 
     def test_watcher_registration_checks_mount_identity(self):
