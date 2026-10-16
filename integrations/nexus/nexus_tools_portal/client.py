@@ -16,7 +16,7 @@ MAX_UPLOAD=50*1024*1024
 MAX_PACKAGE=200*1024*1024
 MAX_RESPONSE=8*1024*1024
 MAX_FILES=2000
-USER_AGENT='Nexus-Portal/0.1.0'
+USER_AGENT='Nexus-Portal/0.2.0'
 
 
 class PortalError(RuntimeError):
@@ -81,7 +81,7 @@ def build_bundle(html, assets=None):
 
 
 class PortalClient:
-    def __init__(self, base_url, api_key, timeout=30):
+    def __init__(self, base_url, api_key, timeout: float=30.0):
         if not isinstance(base_url,str):raise ValueError('Configure PORTAL_BASE_URL in Nexus private settings.')
         try:
             parts=urlsplit(base_url)
@@ -238,8 +238,6 @@ class PortalClient:
 
 def get_client():
     # Read private Nexus configuration per call, including key rotations.
-    from nexus.config import get_setting
-    base=get_setting('PORTAL_BASE_URL')
-    key=get_setting('PORTAL_API_KEY')
-    if not base or not key:raise ValueError('Configure PORTAL_BASE_URL and PORTAL_API_KEY in Nexus private settings.')
-    return PortalClient(base,key)
+    from .settings import PortalSettings
+    settings = PortalSettings.load()
+    return PortalClient(settings.base_url, settings.api_key, settings.timeout)
