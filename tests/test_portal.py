@@ -203,6 +203,11 @@ class PortalTests(unittest.TestCase):
             self.lib.import_report(bundle({'index.html':'longer than limit'}),'large.zip')
         self.assertEqual(self.lib.search({})['total'],1)
 
+    def test_single_page_bundle_entry_url_encodes_reserved_characters(self):
+        report=self.lib.import_report(bundle({'a #1.html':'<title>Special filename</title>'}),'single.zip')
+        self.assertIn('a%20%231.html',report['url'])
+        self.assertEqual(self.request(report['url'])[0],200)
+
     def test_changed_watcher_input_is_retained(self):
         inbox=self.base/'inbox';inbox.mkdir();path=inbox/'changing.html';path.write_text('<title>First</title>')
         self.lib.add_watcher(str(inbox));self.lib.set_setting('watching_enabled',True)

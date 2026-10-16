@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 import zipfile
+from urllib.parse import quote
 
 from metadata import MetadataParser, read_text
 
@@ -117,7 +118,7 @@ class Library:
         value = dict(row)
         value.pop('body',None)
         value['tags']=json.loads(value['tags'])
-        value['url']=f"/files/{value['id']}/{value['entry']}"
+        value['url']=f"/files/{value['id']}/"+quote(value['entry'],safe='/')
         value['reader_url']=f"/read/{value['id']}"
         return value
 
