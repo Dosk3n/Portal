@@ -231,8 +231,8 @@ class Handler(BaseHTTPRequestHandler):
         relative=parts[1] if len(parts)==2 else ''
         if relative=='_portal.css' and self.command in {'GET','HEAD'}:
             return self.file(STATIC,'public.css')
-        if relative=='_logo.png' and self.command in {'GET','HEAD'}:
-            return self.file(STATIC/'branding','portal-logo.png')
+        if relative=='_logo.svg' and self.command in {'GET','HEAD'}:
+            return self.file(STATIC/'branding','portal-logo.svg')
         cookie=SimpleCookie()
         try:cookie.load(self.headers.get('Cookie',''))
         except Exception:pass
@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
     def password_form(self,token,failed=False):
         body=('<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1">'
               f'<title>Protected report · Portal</title><link rel="stylesheet" href="/share/{token}/_portal.css">'
-              f'<main><img class="share-brand" src="/share/{token}/_logo.png" alt="Portal" width="128" height="110">'
+              f'<main><img class="share-brand" src="/share/{token}/_logo.svg" alt="Portal" width="144" height="40">'
               '<h1>A report shared with you.</h1><p>Enter the password to open this report.</p>'
               +('<p role="alert">That password was incorrect.</p>' if failed else '')+
               f'<form method="post" action="/share/{token}/unlock"><label for="password">Password</label>'

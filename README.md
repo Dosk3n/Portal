@@ -75,4 +75,4 @@ Tests cover imports, asset containment, authentication boundaries, key rotation,
 
 ## Source provenance
 
-The initial UI stylesheet and HTML metadata extraction were adapted from the HTML report portal supplied as the starting reference. The import/storage/API/sharing application and interface flows were developed for this project. Upstream redistribution rights should be confirmed before making adapted assets public; no new license is asserted over those materials. The current logo and browser icon use the supplied Portal artwork; see [branding](docs/branding.md).
+The initial UI stylesheet and HTML metadata extraction were adapted from the HTML report portal supplied as the starting reference. The import/storage/API/sharing application and interface flows were developed for this project. Upstream redistribution rights should be confirmed before making adapted assets public; no new license is asserted over those materials. The current logo and browser icon use a native SVG redraw inspired by the supplied Portal artwork; see [branding](docs/branding.md).
