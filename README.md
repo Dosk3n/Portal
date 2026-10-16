@@ -76,8 +76,7 @@ Give the agent your Portal address and the API key from **Settings** through its
 
 Agents can send reports from different computers and networks without a shared folder. Every API or manual submission creates a new private report; sharing is a separate choice.
 
-<details>
-<summary>Agent example: send a report with the API</summary>
+### Agent example: send a report with the API
 
 Use the actual Portal address in place of `https://portal.example.com`. Set `PORTAL_API_KEY` in the agent's environment to the key from Settings.
 
@@ -94,7 +93,6 @@ Send `report.zip` instead if the report has separate images or other assets. Put
 
 The response includes `reader_url`, the private report link. Read `/api/docs` with the same key, or see the [technical reference](docs/reference.md#submit-reports).
 
-</details>
 
 ## Install with Docker
 
