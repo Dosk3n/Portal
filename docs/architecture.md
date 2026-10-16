@@ -28,6 +28,8 @@ The proxy must overwrite `X-Portal-Public` to `1` for shares and `0` for private
 
 Password sessions use random, scoped HttpOnly cookies and store only a token hash. Sessions expire after 12 hours or earlier share expiry. Password changes invalidate sessions; revocation invalidates all access. Password attempts are limited per peer/token in a bounded time window. Behind a shared reverse proxy, the conservative limit is shared by its clients; forwarded IP headers are deliberately not trusted by the application.
 
+After password entry, the sandboxed report and its relative assets use a session-scoped URL prefix. This avoids opaque-origin browser cookie restrictions without granting report scripts same-origin access to Portal. Treat an expanded session URL as temporary access: share the original `/share/<uuid>/` link, not the address containing `/session/`. Session URLs expire within 12 hours and are invalidated by password changes or revocation. Request URLs are never logged; no-referrer and no-store headers apply throughout.
+
 ## Limits
 
 An archive is a report package, not a complete arbitrary website capture. Absolute local asset links, JavaScript-generated filesystem paths, missing files, private external embeds, and some module/storage APIs may need report author changes. A sandbox may require authors fetching packaged JSON to account for opaque-origin CORS. Folder scans are periodic to work with network mounts; stable-file heuristics cannot know whether a paused producer has finished. Prefer complete ZIPs or atomic publication into an inbox.

@@ -135,5 +135,3 @@ class MetadataParser(HTMLParser):
             "excerpt": compact(description or body)[:320],
             "dates": self.dates + [date for child in children for date in child["dates"]],
         }
-
-

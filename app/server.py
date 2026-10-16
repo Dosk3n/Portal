@@ -74,7 +74,8 @@ class Handler(BaseHTTPRequestHandler):
     def error(self,status,message):
         if self.path.startswith('/share/'):
             self.send(status,('<!doctype html><meta name="viewport" content="width=device-width"><title>Share unavailable</title>'
-                              '<link rel="stylesheet" href="/static/public.css"><main><h1>Share unavailable</h1><p>'+escape(message)+'</p></main>').encode(),'text/html; charset=utf-8')
+                              '<style>body{font:17px/1.7 system-ui;color:#244d40;background:#f8f7f3;margin:12vh auto;padding:24px;max-width:540px}</style>'
+                              '<main><h1>Share unavailable</h1><p>'+escape(message)+'</p></main>').encode(),'text/html; charset=utf-8')
         else:self.json({'error':message},status)
 
     def body(self,maximum=16384):
@@ -234,7 +235,17 @@ class Handler(BaseHTTPRequestHandler):
         try:cookie.load(self.headers.get('Cookie',''))
         except Exception:pass
         session=cookie.get('portal_share')
-        unlocked=not share['password'] or self.server.library.unlocked(token,session.value if session else '')
+        credential=session.value if session else ''
+        # Opaque sandbox documents cannot reliably attach SameSite cookies to
+        # subresources. Scope the short-lived unlocked session to a URL prefix
+        # so relative assets remain authorised without weakening the sandbox.
+        session_route=relative.startswith('session/')
+        if session_route:
+            session_parts=relative.split('/',2)
+            if len(session_parts)!=3:raise LookupError('File not found.')
+            credential=session_parts[1]
+            relative=session_parts[2]
+        unlocked=not share['password'] or self.server.library.unlocked(token,credential)
         if self.command=='POST' and relative=='unlock':
             if self.headers.get_content_type()!='application/x-www-form-urlencoded':raise ValueError('Invalid password form.')
             key=(self.client_address[0],token)
@@ -257,8 +268,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.password_form(token)
         root=self.server.library.shares/token/share['version']
         if not relative:
-            return self.send(302,headers={'Location':f'/share/{token}/files/'+quote(share['entry'],safe='/')})
+            prefix=f'/share/{token}/'
+            if share['password']:prefix+=f'session/{credential}/'
+            return self.send(302,headers={'Location':prefix+'files/'+quote(share['entry'],safe='/')})
         if relative.startswith('files/'):
+            if share['password'] and not session_route:
+                return self.send(302,headers={'Location':f'/share/{token}/session/{credential}/'+quote(relative,safe='/')})
             return self.file(root,relative.removeprefix('files/'),sandbox=True)
         raise LookupError('File not found.')
 

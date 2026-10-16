@@ -113,17 +113,22 @@ class PortalTests(unittest.TestCase):
         status,headers,_=self.request(base+'unlock','POST',urlencode({'password':'secret'}),{'Content-Type':'application/x-www-form-urlencoded'})
         self.assertEqual(status,303);self.assertIn('HttpOnly',headers['Set-Cookie']);self.assertIn('Secure',headers['Set-Cookie'])
         cookie=headers['Set-Cookie'].split(';',1)[0]
-        original=self.request(entry,headers={'Cookie':cookie})[2]
+        status,headers,_=self.request(entry,headers={'Cookie':cookie})
+        self.assertEqual(status,302)
+        authorised=headers['Location']
+        original=self.request(authorised)[2]
+        self.assertEqual(self.request(authorised.replace('index.html','assets/image.svg'))[0],200)
         (self.lib.reports/self.report['id']/'index.html').write_text('Changed source')
-        self.assertEqual(self.request(entry,headers={'Cookie':cookie})[2],original)
+        self.assertEqual(self.request(authorised)[2],original)
         newer=self.lib.import_report(b'<title>Replacement</title>new report','new.html')
         updated=self.lib.save_share({'report_id':newer['id']},share['token'])
         self.assertEqual(updated['url'],base)
         self.assertEqual(updated['expires_at'],share['expires_at'])
         self.assertTrue(updated['password_protected'])
-        self.assertIn(b'new report',self.request(entry,headers={'Cookie':cookie})[2])
+        self.assertIn(b'new report',self.request(authorised)[2])
         self.lib.save_share({'password':'different'},share['token'])
         self.assertEqual(self.request(entry,headers={'Cookie':cookie})[0],403)
+        self.assertEqual(self.request(authorised)[0],403)
 
     def test_expiry_revocation_and_independent_assets(self):
         share=self.lib.save_share({'report_id':self.report['id'],'expires_in_days':1})
