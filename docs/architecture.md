@@ -2,6 +2,8 @@
 
 Portal uses Python's standard library HTTP server and SQLite FTS5. The frontend is plain HTML, CSS, and JavaScript. One process serves requests and runs a background inbox importer. No model, agent runtime, external database, or queue service is required.
 
+The visible library checks for new reports every 30 seconds in the background. Unchanged results leave the DOM untouched. Changed results update cards, counts, pagination, and filter choices in place, preserving existing cards and the visible scroll position. Checks pause while the tab is hidden, a dialog is open, or the user is interacting with library controls. Failed checks retain the last successful view, and responses from an earlier page cannot overwrite a later navigation.
+
 ## Storage
 
 - `/data/portal.sqlite`: catalogue, FTS index, settings, single plaintext API key, watcher configuration/import ledger, share access metadata, and hashed share sessions. SQLite WAL files stay alongside the database.

@@ -12,6 +12,8 @@
   let searchTimer;
   let shareSelection;
   let toastTimer;
+  let libraryState;
+  let libraryRefreshInFlight=false;
   const params = () => new URLSearchParams(location.search);
 
   async function request(path, {method='GET', body, signal}={}) {
@@ -44,6 +46,7 @@
 
   async function render() {
     routeController?.abort();routeController=new AbortController();
+    libraryState=null;
     const id=++generation;
     closeDialog();currentReport=null;
     document.body.classList.toggle('reader-mode',location.pathname.startsWith('/read/'));
@@ -72,13 +75,74 @@
       <div class="field"><label for="topic">Collection</label><select id="topic" data-filter="topic">${options(facets.topics,p.get('topic'),'All collections')}</select></div>
       <div class="field"><label for="source">Source</label><select id="source" data-filter="source">${options(facets.sources,p.get('source'),'All sources')}</select></div>
       <div class="field"><label for="tag">Tag</label><select id="tag" data-filter="tag">${options(facets.tags,p.get('tag'),'All tags')}</select></div>
-      <div class="field"><label for="from">From date</label><input type="date" id="from" data-filter="from" value="${esc(p.get('from')||'')}"></div><div class="field"><label for="to">To date</label><input type="date" id="to" data-filter="to" value="${esc(p.get('to')||'')}"></div></div><p class="filter-note">${facets.total} reports in your library.<br>New submissions appear automatically.</p></aside>
+      <div class="field"><label for="from">From date</label><input type="date" id="from" data-filter="from" value="${esc(p.get('from')||'')}"></div><div class="field"><label for="to">To date</label><input type="date" id="to" data-filter="to" value="${esc(p.get('to')||'')}"></div></div><p class="filter-note" id="library-count">${facets.total} reports in your library.<br>New submissions appear automatically.</p></aside>
       <section class="report-workspace" aria-label="Reports"><div class="results-toolbar"><div><h2>${p.size?'Matching reports':'Your reports'}</h2><p class="results-summary" aria-live="polite">${data.total} ${data.total===1?'report':'reports'}</p></div><div class="sort-field"><label for="sort">Sort by</label><select id="sort" data-filter="sort">${[['newest','Newest first'],['oldest','Oldest first'],['title','Title A–Z']].map(([v,t])=>`<option value="${v}"${(p.get('sort')||'newest')===v?' selected':''}>${t}</option>`).join('')}</select></div></div>
-      <div class="reports-grid">${data.reports.length?data.reports.map(card).join(''):`<div class="state-panel"><h3>${p.size?'Nothing matches just yet.':'A home for your next report.'}</h3><p>${p.size?'Try a different search or clear your filters.':'Upload a report or ask an agent to send one to Portal.'}</p><a class="primary-button" href="/upload" data-nav>Add a report</a></div>`}</div>
-      ${data.pages>1?`<nav class="pagination" aria-label="Pages"><span class="pagination-detail">Page ${data.page} of ${data.pages}</span><div class="pagination-links"><button class="page-link" data-page="${data.page-1}" ${data.page===1?'disabled':''}>← Previous</button><button class="page-link" data-page="${data.page+1}" ${data.page===data.pages?'disabled':''}>Next →</button></div></nav>`:''}</section></div><footer class="page-footer"><span>Made to keep the useful things close.</span><span>Private until you choose to share.</span></footer>`;
+      <div class="reports-grid">${data.reports.length?data.reports.map(card).join(''):emptyReports(p)}</div>
+      <div id="library-pagination">${pagination(data)}</div></section></div><footer class="page-footer"><span>Made to keep the useful things close.</span><span>Private until you choose to share.</span></footer>`;
+    libraryState={key:location.pathname+location.search,data,facets};
   }
 
-  function card(r) {return `<a class="report-card" data-nav href="${esc(r.reader_url)}"><div class="card-meta"><span class="source-indicator"></span><span class="card-source">${esc(r.source)}</span><span>·</span><time>${esc(r.date)}</time></div><h3>${esc(r.title)}</h3><p class="card-excerpt">${esc(r.excerpt||'Open this report to take a look inside.')}</p>${r.tags.length?`<div class="tag-list">${r.tags.slice(0,3).map(t=>`<span class="tag-pill">${esc(t)}</span>`).join('')}</div>`:''}<div class="card-footer"><span class="topic-tag">${esc(r.topic)}</span><span class="card-arrow">↗</span></div></a>`;}
+  function emptyReports(p) {return `<div class="state-panel"><h3>${p.size?'Nothing matches just yet.':'A home for your next report.'}</h3><p>${p.size?'Try a different search or clear your filters.':'Upload a report or ask an agent to send one to Portal.'}</p><a class="primary-button" href="/upload" data-nav>Add a report</a></div>`;}
+  function pagination(data) {return data.pages>1?`<nav class="pagination" aria-label="Pages"><span class="pagination-detail">Page ${data.page} of ${data.pages}</span><div class="pagination-links"><button class="page-link" data-page="${data.page-1}" ${data.page===1?'disabled':''}>← Previous</button><button class="page-link" data-page="${data.page+1}" ${data.page===data.pages?'disabled':''}>Next →</button></div></nav>`:'';}
+  function card(r) {return `<a class="report-card" data-report-id="${esc(r.id)}" data-nav href="${esc(r.reader_url)}"><div class="card-meta"><span class="source-indicator"></span><span class="card-source">${esc(r.source)}</span><span>·</span><time>${esc(r.date)}</time></div><h3>${esc(r.title)}</h3><p class="card-excerpt">${esc(r.excerpt||'Open this report to take a look inside.')}</p>${r.tags.length?`<div class="tag-list">${r.tags.slice(0,3).map(t=>`<span class="tag-pill">${esc(t)}</span>`).join('')}</div>`:''}<div class="card-footer"><span class="topic-tag">${esc(r.topic)}</span><span class="card-arrow">↗</span></div></a>`;}
+
+  function canRefreshLibrary() {
+    const focused=document.activeElement;
+    return location.pathname==='/' && libraryState?.key===location.pathname+location.search && !document.hidden && !dialog.open &&
+      !(main.contains(focused) && focused.matches('input,select,textarea,button,a'));
+  }
+
+  async function refreshLibrary() {
+    if(libraryRefreshInFlight || !canRefreshLibrary())return;
+    libraryRefreshInFlight=true;
+    const id=generation,key=location.pathname+location.search,signal=routeController.signal;
+    try {
+      const [data,facets]=await Promise.all([request('/reports?'+params(),{signal}),request('/facets',{signal})]);
+      if(signal.aborted || id!==generation || key!==location.pathname+location.search || !canRefreshLibrary())return;
+      const previous=libraryState;
+      const scrollY=window.scrollY;
+      const grid=main.querySelector('.reports-grid');
+      const anchor=scrollY>0?[...grid.querySelectorAll('.report-card')].find(node=>{const rect=node.getBoundingClientRect();return rect.bottom>0 && rect.top<innerHeight;}):null;
+      const anchorTop=anchor?.getBoundingClientRect().top;
+      if(JSON.stringify(data)!==JSON.stringify(previous.data)) {
+        if(!data.reports.length)grid.innerHTML=emptyReports(params());
+        else {
+          grid.querySelector('.state-panel')?.remove();
+          const nodes=new Map([...grid.querySelectorAll('.report-card')].map(node=>[node.dataset.reportId,node]));
+          const oldReports=new Map(previous.data.reports.map(report=>[report.id,JSON.stringify(report)]));
+          let cursor=grid.firstChild;
+          for(const report of data.reports) {
+            let node=nodes.get(report.id);
+            if(!node || oldReports.get(report.id)!==JSON.stringify(report)) {
+              const template=document.createElement('template');template.innerHTML=card(report);
+              const replacement=template.content.firstElementChild;
+              if(node){if(cursor===node)cursor=replacement;node.replaceWith(replacement);}
+              node=replacement;
+            }
+            if(node!==cursor)grid.insertBefore(node,cursor);
+            cursor=node.nextSibling;
+            nodes.delete(report.id);
+          }
+          for(const node of nodes.values())node.remove();
+        }
+        if(data.total!==previous.data.total)main.querySelector('.results-summary').textContent=`${data.total} ${data.total===1?'report':'reports'}`;
+        if(data.page!==previous.data.page || data.pages!==previous.data.pages)document.getElementById('library-pagination').innerHTML=pagination(data);
+      }
+      for(const [field,list,label] of [['topic','topics','All collections'],['source','sources','All sources'],['tag','tags','All tags']]) {
+        if(JSON.stringify(facets[list])!==JSON.stringify(previous.facets[list])) {
+          const select=document.getElementById(field),value=select.value;
+          select.replaceChildren(new Option(label,''),...facets[list].map(item=>new Option(`${item.name} (${item.count})`,item.name)));
+          select.value=value;
+        }
+      }
+      if(facets.total!==previous.facets.total)document.getElementById('library-count').firstChild.textContent=`${facets.total} reports in your library.`;
+      libraryState={key,data,facets};
+      if(anchor?.isConnected)window.scrollBy(0,anchor.getBoundingClientRect().top-anchorTop);
+      else if(window.scrollY!==scrollY)window.scrollTo(window.scrollX,scrollY);
+    } catch(error) {
+      // Keep the last successful view during transient failures; retry next time.
+    } finally {libraryRefreshInFlight=false;}
+  }
 
   function uploadPage() {
     selectedFile=null;document.title='Upload report · Portal';
@@ -189,6 +253,6 @@
   });
   document.addEventListener('keydown',event=>{if(event.key==='/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName) && document.getElementById('search')){event.preventDefault();document.getElementById('search').focus();}});
   window.addEventListener('popstate',render);
-  setInterval(()=>{if(location.pathname==='/' && window.scrollY<100 && !dialog.open && !['INPUT','SELECT'].includes(document.activeElement.tagName))render();},30000);
+  setInterval(refreshLibrary,30000);
   render();
 })();
