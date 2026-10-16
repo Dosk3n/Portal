@@ -35,6 +35,8 @@ class PortalServer(ThreadingHTTPServer):
     request_queue_size=16
     def __init__(self,address,library,base_url=None):
         self.library=library
+        self.asset_version=hashlib.sha256(b''.join(
+            path.read_bytes() for path in sorted(STATIC.rglob('*')) if path.is_file())).hexdigest()[:16]
         self.base_url=canonical_origin(base_url) if base_url else None
         self.attempts={}
         self.attempt_lock=threading.Lock()
@@ -203,7 +205,7 @@ class Handler(BaseHTTPRequestHandler):
                 with self.server.library.db() as db:db.execute('SELECT 1').fetchone()
                 return self.json({'status':'ok'})
             if path in {'/','/index.html','/settings','/upload','/shares'} or path.startswith('/read/'):
-                return self.file(STATIC,'index.html')
+                return self.index_page()
             if path.startswith('/static/'):return self.file(STATIC,path.removeprefix('/static/'))
             if path.startswith('/files/'):
                 parts=path.removeprefix('/files/').split('/',1)
@@ -268,6 +270,10 @@ class Handler(BaseHTTPRequestHandler):
                 with lib.lock,lib.db() as db:db.execute('DELETE FROM watchers WHERE id=?',(suffix.removeprefix('/watchers/'),))
                 return self.json({'removed':True})
         self.error(404,'Endpoint not found.')
+
+    def index_page(self):
+        body=(STATIC/'index.html').read_bytes().replace(b'__ASSET_VERSION__',self.server.asset_version.encode())
+        self.send(200,body,'text/html; charset=utf-8')
 
     def report_file(self, report_id, relative):
         version=None

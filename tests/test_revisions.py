@@ -177,6 +177,10 @@ class RevisionTests(unittest.TestCase):
             conn=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=10)
             conn.request(method,path,body,headers);r=conn.getresponse();result=(r.status,r.read());conn.close();return result
         try:
+            code,index=request('/',private=True)
+            self.assertEqual(code,200);self.assertNotIn(b'__ASSET_VERSION__',index)
+            self.assertIn(('/static/app.js?v='+server.asset_version).encode(),index)
+            self.assertEqual(request('/static/app.js?v='+server.asset_version,private=True)[0],200)
             path='/api/reports/'+self.id
             code,body=request(path+'/versions','POST',package('Second'),**{'Content-Type':'application/zip','X-Report-Version':self.report['current_version']})
             self.assertEqual(code,201);updated=json.loads(body)
