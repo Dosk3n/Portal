@@ -183,7 +183,52 @@
     const available=await fetch(r.url,{method:'HEAD',signal:routeController.signal});
     if(id!==generation)return;
     if(!available.ok)throw new Error('This report’s files are unavailable. Check report storage, then try again.');
-    main.innerHTML=`<div class="reader-toolbar"><a class="reader-backlink" data-nav href="${esc(libraryUrl)}">← Library</a><div class="reader-info"><h1>${esc(r.title)}</h1><p>${esc(r.topic)} · ${esc(r.source)} · ${esc(r.date)}</p></div><button class="text-button danger" data-delete-report>Delete</button><button class="primary-button" data-new-share>Share externally</button><a class="secondary-button" href="${esc(r.url)}" target="_blank" rel="noopener">Open ↗</a></div><iframe class="reader-frame" id="report-frame" title="${esc(r.title)}" sandbox="allow-scripts allow-forms allow-downloads allow-popups allow-modals" src="${esc(r.url)}"></iframe>`;
+    main.innerHTML=`<div class="reader-toolbar"><a class="reader-backlink" data-nav href="${esc(libraryUrl)}">← Library</a><div class="reader-info"><h1>${esc(r.title)}</h1><p>${esc(r.topic)} · ${esc(r.source)} · ${esc(r.date)}</p></div><button class="text-button" data-report-options>Update</button><button class="text-button danger" data-delete-report>Delete</button><button class="primary-button" data-new-share>Share externally</button><a class="secondary-button" href="${esc(r.url)}" target="_blank" rel="noopener">Open ↗</a></div><iframe class="reader-frame" id="report-frame" title="${esc(r.title)}" sandbox="allow-scripts allow-forms allow-downloads allow-popups allow-modals" src="${esc(r.url)}"></iframe>`;
+  }
+
+  function reportOptions() {
+    openDialog(dialogTop('Update report')+`<p class="dialog-copy">Keep this report’s link and library entry. Shared snapshots stay unchanged until you update them.</p><div class="actions"><button class="primary-button" data-revise>Upload revision</button><button class="secondary-button" data-edit-details>Edit details</button><button class="secondary-button" data-version-history>Version history</button></div>`);
+  }
+
+  function reportEditForm(revision) {
+    const r=currentReport;
+    openDialog(dialogTop(revision?'Upload revision':'Edit report details')+`<form id="report-edit-form" data-revision="${revision}">
+      ${revision?'<div class="field"><label for="revision-file">Revised report file</label><input id="revision-file" type="file" name="file" accept=".html,.htm,.xhtml,.zip" required></div><p class="help">Upload the complete HTML or ZIP with its assets. This replaces the whole report package.</p>':''}
+      <div class="form-grid"><div class="field wide"><label for="edit-title">Title</label><input id="edit-title" name="title" maxlength="500" value="${esc(r.title)}" required></div>
+      <div class="field"><label for="edit-topic">Collection</label><input id="edit-topic" name="topic" maxlength="100" value="${esc(r.topic)}" required></div>
+      <div class="field"><label for="edit-source">Source</label><input id="edit-source" name="source" maxlength="100" value="${esc(r.source)}" required></div>
+      <div class="field"><label for="edit-date">Report date</label><input id="edit-date" name="date" type="date" value="${esc(r.date)}" required></div>
+      <div class="field"><label for="edit-tags">Tags</label><input id="edit-tags" name="tags" value="${esc(r.tags.join(', '))}"></div></div>
+      <div class="actions"><button class="primary-button" type="submit">${revision?'Save revision':'Save details'}</button><button class="secondary-button" type="button" data-close>Cancel</button></div><p id="report-edit-error" class="error" role="alert"></p></form>`);
+  }
+
+  async function saveReportEdit(event) {
+    event.preventDefault();const form=event.target,revision=form.dataset.revision==='true';
+    const button=form.querySelector('[type=submit]');button.disabled=true;
+    try {
+      if(revision) {
+        const response=await fetch('/internal/reports/'+currentReport.id+'/versions',{method:'POST',headers:{'X-Portal-Request':'1','X-Report-Version':currentReport.current_version},body:new FormData(form)});
+        const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not save the revision.');
+      } else {
+        await request('/reports/'+currentReport.id,{method:'PATCH',body:{...Object.fromEntries(new FormData(form)),expected_version:currentReport.current_version}});
+      }
+      toast(revision?'Report updated. Shared snapshots are unchanged.':'Report details saved.');await render();
+    }catch(error){document.getElementById('report-edit-error').textContent=error.message;button.disabled=false;}
+  }
+
+  async function versionHistory() {
+    const data=await request('/reports/'+currentReport.id+'/versions');
+    openDialog(dialogTop('Version history')+`<p class="dialog-copy">Restoring makes a new current version. Older versions are removed according to your retention setting.</p>${data.versions.map(v=>`<div class="watch-row"><strong>Version ${v.number}${v.current?' · Current':''}</strong><p class="help">${esc(date(v.saved_at))} · ${esc(v.title)}</p><div class="actions"><a class="secondary-button" target="_blank" rel="noopener" href="${esc(v.url)}">View version ${v.number} ↗</a>${v.current?'':`<button class="secondary-button" data-restore-version="${v.version}">Restore version ${v.number}</button>`}</div></div>`).join('')}`);
+  }
+
+  async function retentionSave(event) {
+    event.preventDefault();const value=Number(document.getElementById('versions-to-keep').value);
+    try {
+      const preview=await request('/settings/retention-preview?limit='+encodeURIComponent(value));
+      if(preview.versions_to_remove) {
+        openDialog(dialogTop('Remove older versions?')+`<p class="dialog-copy">Keeping ${value} ${value===1?'version':'versions'} per report will permanently remove ${preview.versions_to_remove} older ${preview.versions_to_remove===1?'version':'versions'} and their assets. Shared snapshots stay available.</p><div class="actions"><button class="primary-button" data-confirm-retention="${value}">Save and remove older versions</button><button class="secondary-button" data-close>Cancel</button></div>`);
+      } else {await request('/settings',{method:'PATCH',body:{versions_to_keep:value}});toast('Version retention saved.');await render();}
+    }catch(error){document.getElementById('retention-error').textContent=error.message;}
   }
 
   async function settingsPage(id) {
@@ -191,7 +236,7 @@
     document.title='Settings · Portal';
     main.innerHTML=heading('Make yourself at home.','Manage agent access and optional folder imports.')+`<div class="settings-layout"><section class="panel"><h2>API access</h2><p>Use this key to submit reports from your agents and other computers. The API is available at <code>${esc(location.origin)}/api</code>.</p><div class="key-row"><input id="api-key" type="password" readonly autocomplete="off" aria-label="API key" value="${esc(settings.api_key)}"><button class="secondary-button" data-reveal>Show</button><button class="secondary-button" data-copy-key>Copy key</button><button class="secondary-button" data-rotate>Regenerate</button></div><p class="help">Regenerating immediately disconnects clients using the old key. <a href="/settings#api-guide" id="api-guide-link">Agent submission example ↓</a></p></section>
       <section class="panel"><h2>Folder imports</h2><p>Consume completed HTML files, ZIP bundles, or report folders from locations you choose. Successful imports remove the incoming submission; failures stay in place.</p><label class="toggle-row"><input type="checkbox" id="watching-enabled" ${settings.watching_enabled?'checked':''}>Enable folder watching</label><p class="help">Checks every 5 seconds; waits for files to remain unchanged for at least 10 seconds. For HTML with assets, put the entire submission in its own folder. Mounted NAS folders are reconciled through these scans.</p><button class="secondary-button" type="button" data-refresh-watchers>Refresh activity</button><div id="watchers">${settings.watchers.map(w=>`<div class="watch-row"><p class="watch-path">${esc(w.path)}</p><p class="watch-status">${!settings.watching_enabled?'Paused (watching is off)':w.enabled?'Enabled':'Paused'} · Last checked: ${w.last_checked?esc(date(w.last_checked)):'Not yet'}${w.last_import?' · Last import: '+esc(date(w.last_import)):''}</p>${w.error?`<p class="error">${esc(w.error)}</p>`:''}<div class="actions"><button class="secondary-button" data-watch-toggle="${w.id}" data-enabled="${!w.enabled}">${w.enabled?'Pause':'Enable'}</button><button class="text-button" data-watch-remove="${w.id}">Remove location</button></div></div>`).join('')||'<p class="help">No folders configured. API and manual uploads work independently.</p>'}</div>${watchActivity(settings.activity)}<form id="watch-form" class="watch-edit"><div class="field"><label for="watch-path">Add a folder inside the container</label><input id="watch-path" name="path" placeholder="/mnt/reports/inbox" required></div><div class="actions"><button class="secondary-button">Add location</button></div><p class="help">To change a location, remove it and add the new path. Existing reports are preserved.</p><p id="watch-error" class="error" role="alert"></p></form></section>
-      <section class="panel"><h2>Storage</h2><p>Storage mounts are configured at deployment. The database and settings stay separate from report files.</p><p class="storage-line">Reports: ${esc(settings.storage)}/reports</p><p class="storage-line">Snapshots: ${esc(settings.storage)}/shares</p></section>
+      <section class="panel"><h2>Report versions</h2><p>Keep the current version and a limited history for each report. Shared snapshots are stored separately.</p><form id="retention-form"><div class="field"><label for="versions-to-keep">Versions to keep</label><input id="versions-to-keep" type="number" min="1" max="100" step="1" value="${settings.versions_to_keep}" required></div><p class="help">Three means the current version and two previous versions. One keeps only the current version.</p><div class="actions"><button class="secondary-button" type="submit">Save version retention</button></div><p id="retention-error" class="error" role="alert"></p></form></section><section class="panel"><h2>Storage</h2><p>Storage mounts are configured at deployment. The database and settings stay separate from report files.</p><p class="storage-line">Reports: ${esc(settings.storage)}/reports</p><p class="storage-line">Snapshots: ${esc(settings.storage)}/shares</p></section>
       <section class="panel" id="api-guide"><h2>Send a report from an agent</h2><p>Upload one report per request. Optional fields include title, source, topic, date, and comma-separated tags.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin-top:18px">curl -X POST '${esc(location.origin)}/api/reports' \\\n  -H 'X-Api-Key: YOUR_API_KEY' \\\n  -F 'file=@report.zip' \\\n  -F 'topic=Research' \\\n  -F 'source=Agent' \\\n  -F 'tags=ideas,comparison'</pre><p class="help">The response includes a private reader link. Creating a public share is a separate action. API documentation is available at <code>/api/docs</code> with the same key.</p></section></div>`;
   }
 
@@ -207,13 +252,13 @@
 
   function shareForm(share=null) {
     const editing=Boolean(share);shareSelection=editing?share.report_id:currentReport.id;
-    openDialog(dialogTop(editing?'Update shared snapshot':'Share externally')+`<p class="dialog-copy">${editing?'The existing URL stays the same. Choose a replacement report when you are ready to share it.':'Anyone with the link can read this snapshot, subject to your password and expiry settings. New reports will not change it automatically.'}</p><form id="share-form" data-token="${share?.token||''}">${editing?`<div class="field"><label for="replacement-search">Find a replacement report (optional)</label><input id="replacement-search" type="search" placeholder="Search your library…" autocomplete="off"></div><div class="report-picker" id="report-picker"></div><p class="help" id="replacement-status">Keeping the current report: ${esc(share.title)}</p>`:`<p class="share-report-title">${esc(currentReport.title)}</p>`}
+    openDialog(dialogTop(editing?'Update shared snapshot':'Share externally')+`<p class="dialog-copy">${editing?'The existing URL stays the same. Choose a replacement report when you are ready to share it.':'Anyone with the link can read this snapshot, subject to your password and expiry settings. New reports will not change it automatically.'}</p><form id="share-form" data-token="${share?.token||''}">${editing?`<div class="field"><label for="replacement-search">Find a replacement report (optional)</label><input id="replacement-search" type="search" placeholder="Search your library…" autocomplete="off"></div><div class="report-picker" id="report-picker"></div><p class="help" id="replacement-status">Keeping the current snapshot: ${esc(share.title)}</p><label class="toggle-row"><input type="checkbox" id="refresh-snapshot">Update snapshot to the latest version of this report</label>`:`<p class="share-report-title">${esc(currentReport.title)}</p>`}
       <div class="form-grid" style="margin-top:20px"><div class="field wide"><label for="share-days">${editing?'Change expiry':'Link expires'}</label><select id="share-days">${editing?'<option value="keep">Keep current expiry</option>':''}<option value="1">In 1 day</option><option value="7" ${editing?'':'selected'}>In 7 days</option><option value="30">In 30 days</option><option value="custom">Custom number of days</option><option value="never">Never</option></select></div><div class="field wide" id="custom-days-field" hidden><label for="custom-days">Days from now</label><input id="custom-days" type="number" min="0.01" max="3650" step="any" value="14"></div><div class="field wide"><label for="share-password">${editing?'Password change (optional)':'Password (optional)'}</label><input id="share-password" type="password" maxlength="256" autocomplete="new-password" placeholder="${editing?'Leave blank to keep current password':'Leave blank for link-only access'}"></div>${editing?'<label class="toggle-row wide"><input type="checkbox" id="remove-password">Remove existing password</label>':''}</div><div class="actions"><button type="submit" class="primary-button">${editing?'Update share':'Create snapshot link'}</button><button type="button" class="secondary-button" data-close>Cancel</button></div><div id="share-error" class="error" role="alert"></div></form>`);
   }
 
   async function saveShare(event) {
     event.preventDefault();const form=event.target,token=form.dataset.token;
-    const body={report_id:shareSelection};const expiry=document.getElementById('share-days').value;
+    const body={report_id:shareSelection};if(document.getElementById('refresh-snapshot')?.checked)body.refresh_snapshot=true;const expiry=document.getElementById('share-days').value;
     if(expiry!=='keep')body.expires_in_days=expiry==='never'?null:expiry==='custom'?Number(document.getElementById('custom-days').value):Number(expiry);
     const password=document.getElementById('share-password').value;
     if(password || document.getElementById('remove-password')?.checked)body.password=document.getElementById('remove-password')?.checked?'':password;
@@ -236,6 +281,13 @@
       if(target.hasAttribute('data-reset'))navigate('/');
       if(target.dataset.page){const p=params();p.set('page',target.dataset.page);navigate('/?'+p);}
       if(target.id==='filters-toggle'){const expanded=target.getAttribute('aria-expanded')!=='true';filtersOpen=expanded;target.setAttribute('aria-expanded',expanded);document.getElementById('filter-panel').classList.toggle('is-open',expanded);}
+      if(target.hasAttribute('data-report-options'))reportOptions();
+      if(target.hasAttribute('data-revise'))reportEditForm(true);
+      if(target.hasAttribute('data-edit-details'))reportEditForm(false);
+      if(target.hasAttribute('data-version-history'))await versionHistory();
+      if(target.dataset.restoreVersion)openDialog(dialogTop('Restore this version?')+`<p class="dialog-copy">This becomes a new current version. Retention may remove the oldest version. Shared snapshots stay unchanged.</p><div class="actions"><button class="primary-button" data-confirm-restore="${esc(target.dataset.restoreVersion)}">Restore version</button><button class="secondary-button" data-close>Cancel</button></div>`);
+      if(target.dataset.confirmRestore){await request('/reports/'+currentReport.id+'/restore',{method:'POST',body:{version:target.dataset.confirmRestore,expected_version:currentReport.current_version}});toast('Version restored. Shared snapshots are unchanged.');await render();}
+      if(target.dataset.confirmRetention){target.disabled=true;try{await request('/settings',{method:'PATCH',body:{versions_to_keep:Number(target.dataset.confirmRetention)}});toast('Version retention saved.');await render();}catch(error){target.disabled=false;throw error;}}
       if(target.hasAttribute('data-new-share'))shareForm();
       if(target.hasAttribute('data-delete-report'))openDialog(dialogTop('Delete this report?')+'<p class="dialog-copy">This removes the report and its files from your library. Existing shared snapshots remain available.</p><div class="actions"><button class="primary-button" data-confirm-delete>Delete report</button><button class="secondary-button" data-close>Cancel</button></div>');
       if(target.hasAttribute('data-confirm-delete')){await request('/reports/'+currentReport.id,{method:'DELETE'});toast('Report deleted. Shared snapshots are preserved.');navigate(libraryUrl);}
@@ -254,6 +306,8 @@
     } catch(error){toast(error.message);}
   });
   document.addEventListener('submit',async event=>{
+    if(event.target.id==='report-edit-form')return saveReportEdit(event);
+    if(event.target.id==='retention-form')return retentionSave(event);
     if(event.target.id==='upload-form')return upload(event);
     if(event.target.id==='share-form')return saveShare(event);
     if(event.target.id==='search-form'){event.preventDefault();filters({q:document.getElementById('search').value});}

@@ -7,7 +7,7 @@ The visible library checks for new reports every 30 seconds in the background. U
 ## Storage
 
 - `/data/portal.sqlite`: catalogue, FTS index, settings, single plaintext API key, watcher configuration/import ledger, share access metadata, and hashed share sessions. SQLite WAL files stay alongside the database.
-- `<storage>/reports/<uuid>/`: immutable imported HTML and assets. Original upload ZIPs are not retained.
+- `<storage>/reports/<uuid>/`: one immutable HTML/assets package per retained report version. The catalogue maps each report to its current package. Original upload ZIPs are not retained.
 - `<storage>/shares/<uuid>/<version-uuid>/`: independent share package. Snapshot replacement writes the new package before changing its database pointer.
 
 Storage paths are configurable startup arguments. Filesystem paths are relative inside the catalogue, so underlying local-to-remote file movement does not change report identities. Search uses local extracted text without scanning report storage. A missing file returns an unavailable response; it does not erase its catalogue entry.
@@ -36,4 +36,4 @@ After password entry, the sandboxed report and its relative assets use a session
 
 An archive is a report package, not a complete arbitrary website capture. Absolute local asset links, JavaScript-generated filesystem paths, missing files, private external embeds, and some module/storage APIs may need report author changes. A sandbox may require authors fetching packaged JSON to account for opaque-origin CORS. Folder scans are periodic to work with network mounts; stable-file heuristics cannot know whether a paused producer has finished. Prefer complete ZIPs or atomic publication into an inbox.
 
-The first release has no report editing, offline cache, model execution, automatic research, scheduled share cleanup, or multi-instance coordination. Metadata is supplied at import. A replacement share deliberately selects an existing report; it does not infer a revision relationship.
+Explicit revisions keep the report ID while publishing a new package and switching the catalogue/FTS pointer in one transaction. Existing installations register their original packages as version 1 without copying files or changing the API key. Private preview URLs pin the version so relative assets cannot mix across revisions. Restore copies a retained package into a new current version. The retention setting (three total by default) prunes old packages and their metadata after publication; shared snapshots remain independent. Metadata-only edits update the current details without copying assets. There is no offline cache, model execution, automatic research, scheduled share cleanup, or multi-instance coordination.

@@ -21,7 +21,7 @@ import threading
 import time
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from library import Library, MAX_UPLOAD, identifier
+from library import Library, MAX_UPLOAD, identifier, RevisionConflict
 from settings import canonical_origin
 from watcher import Watcher
 from safe_files import open_regular
@@ -160,6 +160,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_request(self):
         try:self.route()
         except (BrokenPipeError,ConnectionResetError):pass
+        except RevisionConflict as exc:self.error(409,str(exc))
         except LookupError as exc:self.error(404,str(exc))
         except (ValueError,UnicodeError,json.JSONDecodeError) as exc:self.error(400,str(exc))
         except sqlite3.IntegrityError:self.error(409,'That entry already exists.')
@@ -207,12 +208,11 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/files/'):
                 parts=path.removeprefix('/files/').split('/',1)
                 if len(parts)!=2 or not identifier(parts[0]):raise LookupError('File not found.')
-                self.server.library.report(parts[0])
-                return self.file(self.server.library.reports/parts[0],parts[1],sandbox=True)
+                return self.report_file(parts[0],parts[1])
             return self.error(404,'Not found.')
         lib=self.server.library
         if self.command in {'GET','HEAD'}:
-            if suffix in {'','/'}:return self.json({'name':'Portal API','version':'1.0.0','docs':'/api/docs'})
+            if suffix in {'','/'}:return self.json({'name':'Portal API','version':'1.1.0','docs':'/api/docs'})
             if suffix=='/docs':return self.json(API_DOCS)
             if suffix=='/reports':return self.json(lib.search(params))
             if suffix=='/facets':return self.json(lib.facets())
@@ -220,11 +220,21 @@ class Handler(BaseHTTPRequestHandler):
                 parts=suffix.removeprefix('/reports/').split('/',2)
                 report=lib.report(parts[0])
                 if len(parts)==1:return self.json(report)
-                if len(parts)==3 and parts[1]=='files':return self.file(lib.reports/report['id'],parts[2],sandbox=True)
+                if len(parts)==2 and parts[1]=='versions':return self.json({'versions':lib.versions(report['id'])})
+                if len(parts)==3 and parts[1]=='files':return self.report_file(report['id'],parts[2])
+                if len(parts)==3 and parts[1]=='versions':return self.report_file(report['id'],'versions/'+parts[2])
             if suffix=='/shares':return self.json({'shares':lib.list_shares(params.get('report_id'))})
             if not api and suffix=='/settings':return self.json(lib.settings())
+            if not api and suffix=='/settings/retention-preview':
+                return self.json({'versions_to_remove':lib.retention_preview(int(params.get('limit','3')))})
         elif self.command=='POST':
             if suffix=='/reports':return self.upload()
+            if suffix.startswith('/reports/'):
+                parts=suffix.removeprefix('/reports/').split('/')
+                if len(parts)==2 and parts[1]=='versions':return self.upload(parts[0])
+                if len(parts)==2 and parts[1]=='restore':
+                    value=self.json_body()
+                    return self.json(lib.restore_version(parts[0],value.get('version'),value.get('expected_version')),201)
             if suffix=='/shares':return self.json(lib.save_share(self.json_body()),201)
             if not api and suffix=='/settings/api-key':
                 with lib.lock:lib.set_setting('api_key',secrets.token_urlsafe(32))
@@ -234,12 +244,13 @@ class Handler(BaseHTTPRequestHandler):
                 with lib.lock:result=lib.add_watcher(value.get('path'),value.get('enabled',True))
                 return self.json({'id':result},201)
         elif self.command=='PATCH':
+            if suffix.startswith('/reports/') and '/' not in suffix.removeprefix('/reports/'):
+                return self.json(lib.edit_report(suffix.removeprefix('/reports/'),self.json_body()))
             if suffix.startswith('/shares/'):
                 return self.json(lib.save_share(self.json_body(),suffix.removeprefix('/shares/')))
             if not api and suffix=='/settings':
                 value=self.json_body()
-                if type(value.get('watching_enabled')) is not bool:raise ValueError('Choose whether watching is enabled.')
-                with lib.lock:lib.set_setting('watching_enabled',value['watching_enabled'])
+                lib.update_settings(value)
                 return self.json({'saved':True})
             if not api and suffix.startswith('/watchers/'):
                 value=self.json_body()
@@ -258,7 +269,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({'removed':True})
         self.error(404,'Endpoint not found.')
 
-    def upload(self):
+    def report_file(self, report_id, relative):
+        version=None
+        if relative.startswith('versions/'):
+            parts=relative.split('/',3)
+            if len(parts)!=4 or parts[2]!='files' or not identifier(parts[1]):raise LookupError('File not found.')
+            version=parts[1];relative=parts[3]
+        return self.file(self.server.library.package_path(report_id,version),relative,sandbox=True)
+
+    def upload(self, report_id=None):
         if not self.server.upload_slots.acquire(blocking=False):return self.error(429,'Uploads are busy. Try again shortly.')
         try:
             raw=self.body(MAX_UPLOAD+65536)
@@ -282,7 +301,8 @@ class Handler(BaseHTTPRequestHandler):
                     value=self.headers.get('X-Report-'+key)
                     if value:metadata[key]=value
             else:raise ValueError('Upload multipart/form-data, text/html, or application/zip.')
-            self.json(self.server.library.import_report(payload,filename,metadata),201)
+            self.json(self.server.library.import_report(payload,filename,metadata,report_id=report_id,
+                      expected=self.headers.get('X-Report-Version')),201)
         finally:self.server.upload_slots.release()
 
     def share_route(self,path):
@@ -384,15 +404,20 @@ class Handler(BaseHTTPRequestHandler):
         finally:context.__exit__(None,None,None)
 
 
-API_DOCS={'version':'1.0.0','authentication':'X-Api-Key header. Manage the single key in browser Settings.',
+API_DOCS={'version':'1.1.0','authentication':'X-Api-Key header. Manage the single key in browser Settings.',
  'endpoints':{'GET /api/reports':'Search with q, source, topic, tag, from, to, sort, page, limit.',
  'GET /api/reports/{id}':'Report metadata. Browser reader_url uses private library access.',
  'GET /api/reports/{id}/files/{path}':'Download report content with API key.',
  'POST /api/reports':'Multipart file + optional title, source, topic, date (YYYY-MM-DD), tags (comma separated). Or raw text/html or application/zip with optional X-Filename and X-Report-* headers.',
+ 'POST /api/reports/{id}/versions':'Revise HTML/assets using the same upload formats; keep report ID/link. Optional X-Report-Version rejects stale updates with 409. Old versions pruned to Settings retention (3 total by default).',
+ 'GET /api/reports/{id}/versions':'List retained versions, newest first; includes version UUID, number, current flag and private preview URL.',
+ 'GET /api/reports/{id}/versions/{version}/files/{path}':'Download a specific retained version with API key.',
+ 'POST /api/reports/{id}/restore':'JSON version UUID and optional expected_version; restore as a new current version, subject to retention.',
+ 'PATCH /api/reports/{id}':'Edit title, source, topic, date or tags without creating a content version. Optional expected_version.',
  'GET /api/facets':'Collections, sources, tags and counts.',
  'GET /api/shares':'List snapshots; optional report_id filter.',
  'POST /api/shares':'JSON report_id, expires_in_days (number or null), optional password.',
- 'PATCH /api/shares/{token}':'Replace snapshot using report_id; optionally change expires_in_days or password (empty removes it). Omitted fields remain unchanged.',
+ 'PATCH /api/shares/{token}':'Replace snapshot using report_id. For the same revised report use refresh_snapshot:true; otherwise its existing snapshot is kept. Optionally change expires_in_days or password (empty removes it). Omitted fields remain unchanged.',
  'DELETE /api/shares/{token}':'Revoke snapshot.'},
  'limits':{'upload_mb':50,'expanded_mb':200,'files':2000},
  'bundles':'Use relative asset paths. A multi-page ZIP requires index.html at its root. HTML runs in an opaque-origin sandbox; storage and some browser APIs are unavailable.'}

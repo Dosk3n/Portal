@@ -42,6 +42,10 @@ def identifier(value):
         return False
 
 
+class RevisionConflict(ValueError):
+    pass
+
+
 class Library:
     def __init__(self, data_dir, storage_dir):
         self.data = Path(data_dir).resolve()
@@ -81,7 +85,20 @@ class Library:
                     id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL,
                     last_checked TEXT, last_import TEXT, error TEXT NOT NULL DEFAULT '');
             ''')
-            for key,value in {'api_key':secrets.token_urlsafe(32),'watching_enabled':False}.items():
+            columns={r['name'] for r in db.execute('PRAGMA table_info(reports)')}
+            if 'current_version' not in columns:
+                db.execute("ALTER TABLE reports ADD COLUMN current_version TEXT NOT NULL DEFAULT ''")
+            db.execute('''CREATE TABLE IF NOT EXISTS report_versions(
+                version TEXT PRIMARY KEY, report_id TEXT NOT NULL, number INTEGER NOT NULL,
+                saved_at TEXT NOT NULL, metadata TEXT NOT NULL)''')
+            db.execute('CREATE INDEX IF NOT EXISTS report_versions_report ON report_versions(report_id,number DESC)')
+            # Existing packages already have UUID names; register them in place.
+            for row in db.execute("SELECT * FROM reports WHERE current_version='' ").fetchall():
+                value=dict(row);value['current_version']=value['id']
+                db.execute('INSERT OR IGNORE INTO report_versions VALUES (?,?,?,?,?)',
+                           (value['id'],value['id'],1,value['created_at'],json.dumps(value)))
+                db.execute('UPDATE reports SET current_version=? WHERE id=?',(value['id'],value['id']))
+            for key,value in {'api_key':secrets.token_urlsafe(32),'watching_enabled':False,'versions_to_keep':3}.items():
                 db.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(key,json.dumps(value)))
 
     @contextmanager
@@ -105,11 +122,51 @@ class Library:
         with self.db() as db:
             db.execute('UPDATE settings SET value=? WHERE key=?',(json.dumps(value),key))
 
+    @staticmethod
+    def retention_limit(value):
+        if type(value) is not int or not 1 <= value <= 100:
+            raise ValueError('Versions to keep must be a whole number between 1 and 100.')
+        return value
+
+    def retention_preview(self, limit):
+        limit=self.retention_limit(limit)
+        with self.db() as db:
+            counts=db.execute('SELECT count(*) n FROM report_versions GROUP BY report_id').fetchall()
+        return sum(max(0,r['n']-limit) for r in counts)
+
+    def prune_versions(self, report_id=None):
+        with self.lock:
+            limit=self.setting('versions_to_keep')
+            with self.db() as db:
+                ids=[r[0] for r in db.execute('SELECT id FROM reports'+(' WHERE id=?' if report_id else ''),
+                                            (report_id,) if report_id else ())]
+            for rid in ids:
+                with self.db() as db:
+                    old=db.execute('SELECT version FROM report_versions WHERE report_id=? ORDER BY number DESC LIMIT -1 OFFSET ?',
+                                   (rid,limit)).fetchall()
+                for row in old:
+                    folder=self.reports/row['version']
+                    # Delete files before dropping their record, so a storage failure is retryable.
+                    if folder.is_symlink():raise OSError('Version storage cannot be a symlink.')
+                    if folder.exists():shutil.rmtree(folder)
+                    with self.db() as db:
+                        db.execute('DELETE FROM report_versions WHERE version=?',(row['version'],))
+
+    def update_settings(self, values):
+        if not values or set(values)-{'watching_enabled','versions_to_keep'}:
+            raise ValueError('Choose a supported setting.')
+        if 'watching_enabled' in values and type(values['watching_enabled']) is not bool:
+            raise ValueError('Choose whether watching is enabled.')
+        if 'versions_to_keep' in values:self.retention_limit(values['versions_to_keep'])
+        with self.lock:
+            for key,value in values.items():self.set_setting(key,value)
+            if 'versions_to_keep' in values:self.prune_versions()
+
     def settings(self):
         with self.db() as db:
             watchers = [dict(r) for r in db.execute('SELECT * FROM watchers ORDER BY path')]
             activity = [dict(r) for r in db.execute('SELECT * FROM watch_activity ORDER BY id DESC LIMIT 20')]
-        return {'api_key': self.setting('api_key'), 'watching_enabled':self.setting('watching_enabled'),
+        return {'versions_to_keep':self.setting('versions_to_keep'),'api_key': self.setting('api_key'), 'watching_enabled':self.setting('watching_enabled'),
                 'watchers':watchers,'activity':activity,'storage':str(self.storage),'max_upload_mb':MAX_UPLOAD//1024//1024}
 
     def report(self, report_id):
@@ -124,7 +181,7 @@ class Library:
         value = dict(row)
         value.pop('body',None)
         value['tags']=json.loads(value['tags'])
-        value['url']=f"/files/{value['id']}/"+quote(value['entry'],safe='/')
+        value['url']=f"/files/{value['id']}/versions/{value['current_version']}/files/"+quote(value['entry'],safe='/')
         value['reader_url']=f"/read/{value['id']}"
         return value
 
@@ -199,9 +256,98 @@ class Library:
         except zipfile.BadZipFile:
             raise ValueError('The ZIP bundle is invalid.') from None
 
-    def import_report(self,payload,filename,metadata=None,watch_identity=None):
+    def version(self, report_id, version=None):
+        report=self.report(report_id)
+        version=version or report['current_version']
+        with self.db() as db:
+            row=db.execute('SELECT * FROM report_versions WHERE report_id=? AND version=?',(report_id,version)).fetchone()
+        if row is None:raise LookupError('Report version not found or no longer retained.')
+        return dict(row)
+
+    def package_path(self, report_id, version=None):
+        row=self.version(report_id,version)
+        if not identifier(row['version']):raise ValueError('Invalid version identifier.')
+        return self.reports/row['version']
+
+    def versions(self, report_id):
+        report=self.report(report_id)
+        with self.db() as db:
+            rows=db.execute('SELECT * FROM report_versions WHERE report_id=? ORDER BY number DESC',(report_id,)).fetchall()
+        return [{**self.public_report(json.loads(r['metadata'])),'version':r['version'],'number':r['number'],
+                 'saved_at':r['saved_at'],'current':r['version']==report['current_version']} for r in rows]
+
+    @staticmethod
+    def check_revision(report, expected):
+        if expected is not None and expected!=report['current_version']:
+            raise RevisionConflict('This report has changed. Reload it before updating.')
+
+    def restore_version(self, report_id, version, expected=None):
+        if not identifier(version):raise ValueError('Choose a retained version UUID.')
+        with self.lock:
+            self.check_revision(self.report(report_id),expected)
+            previous=self.version(report_id,version)
+            metadata=json.loads(previous['metadata'])
+            # Reuse the same validated publishing path, without retaining an archive.
+            return self._publish_revision(report_id,self.reports/previous['version'],metadata,expected)
+
+    def edit_report(self, report_id, values):
+        allowed={'title','source','topic','date','tags','expected_version'}
+        if not values or set(values)-allowed:raise ValueError('Choose supported report details.')
+        with self.lock, self.db() as db:
+            row=db.execute('SELECT * FROM reports WHERE id=?',(report_id,)).fetchone()
+            if row is None:raise LookupError('Report not found.')
+            report=dict(row);self.check_revision(report,values.get('expected_version'))
+            details=self._metadata(values,report)
+            report.update(details)
+            db.execute('UPDATE reports SET title=?,source=?,topic=?,date=?,tags=? WHERE id=?',
+                       (*(report[k] for k in ('title','source','topic','date','tags')),report_id))
+            db.execute('UPDATE report_versions SET metadata=? WHERE version=?',(json.dumps(report),report['current_version']))
+            db.execute('DELETE FROM reports_fts WHERE id=?',(report_id,))
+            db.execute('INSERT INTO reports_fts VALUES (?,?,?,?)',(report_id,report['title'],report['body'],' '.join(json.loads(report['tags']))))
+        return self.report(report_id)
+
+    @staticmethod
+    def _metadata(values, defaults):
+        result={}
+        for key,maximum in [('title',500),('source',100),('topic',100)]:
+            value=values.get(key,defaults[key])
+            if not isinstance(value,str) or not value.strip():raise ValueError(key.capitalize()+' must contain text.')
+            result[key]=value.strip()[:maximum]
+        date=values.get('date',defaults['date'])
+        if not isinstance(date,str):raise ValueError('Date must use YYYY-MM-DD.')
+        datetime.strptime(date,'%Y-%m-%d');result['date']=date
+        tags=values.get('tags',json.loads(defaults['tags']) if isinstance(defaults['tags'],str) else defaults['tags'])
+        if isinstance(tags,str):tags=tags.split(',')
+        if not isinstance(tags,list) or any(not isinstance(t,str) for t in tags):raise ValueError('Tags must be text.')
+        result['tags']=json.dumps(list(dict.fromkeys(t.strip()[:80] for t in tags if t.strip()))[:30])
+        return result
+
+    def _publish_revision(self, report_id, stage, metadata, expected=None):
+        previous=self.report(report_id);self.check_revision(previous,expected)
+        version=str(uuid.uuid4());destination=self.reports/version
+        validate_package(stage,metadata['entry'])
+        try:
+            copy_tree(stage,destination)
+            with self.db() as db:
+                number=db.execute('SELECT max(number)+1 FROM report_versions WHERE report_id=?',(report_id,)).fetchone()[0]
+                value={**metadata,'id':report_id,'created_at':previous['created_at'],'current_version':version}
+                if isinstance(value['tags'],list):value['tags']=json.dumps(value['tags'])
+                db.execute('INSERT INTO report_versions VALUES (?,?,?,?,?)',(version,report_id,number,now(),json.dumps(value)))
+                fields=('title','source','topic','date','excerpt','body','entry','bytes','tags','current_version')
+                db.execute('UPDATE reports SET '+','.join(k+'=?' for k in fields)+' WHERE id=?',(*(value[k] for k in fields),report_id))
+                db.execute('DELETE FROM reports_fts WHERE id=?',(report_id,))
+                db.execute('INSERT INTO reports_fts VALUES (?,?,?,?)',(report_id,value['title'],value['body'],' '.join(json.loads(value['tags']))))
+                # Revised content is no longer an identical watched submission.
+                db.execute('DELETE FROM watch_imports WHERE report_id=?',(report_id,))
+        except Exception:
+            shutil.rmtree(destination,ignore_errors=True);raise
+        self.prune_versions(report_id)
+        return self.report(report_id)
+
+    def import_report(self,payload,filename,metadata=None,watch_identity=None,report_id=None,expected=None):
         metadata=metadata or {}
-        report_id=str(uuid.uuid4())
+        updating=report_id is not None
+        report_id=report_id or str(uuid.uuid4())
         with self.lock, tempfile.TemporaryDirectory(prefix='.import-',dir=self.reports) as temporary:
             stage=Path(temporary)
             entry=self.extract(payload,filename,stage)
@@ -218,12 +364,22 @@ class Library:
             if not isinstance(tags,list) or any(not isinstance(t,str) for t in tags): raise ValueError('Tags must be text.')
             tags=list(dict.fromkeys(t.strip()[:80] for t in tags if t.strip()))[:30]
             size=sum(p.stat().st_size for p in stage.rglob('*') if p.is_file())
+            if updating:
+                previous=self.report(report_id)
+                details=self._metadata(metadata,previous)
+                value={**details,'excerpt':parsed['excerpt'],'body':parsed['body'],'entry':entry,'bytes':size}
+                # Use an HTML title on revision unless an explicit title was supplied.
+                if 'title' not in metadata and parsed['title']:value['title']=parsed['title'][:500]
+                return self._publish_revision(report_id,stage,value,expected)
             destination=self.reports/report_id
             try:
                 copy_tree(stage,destination)
                 with self.db() as db:
-                    db.execute('INSERT INTO reports VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                               (report_id,title,source,topic,date,now(),parsed['excerpt'],parsed['body'],entry,size,json.dumps(tags)))
+                    created=now()
+                    value=(report_id,title,source,topic,date,created,parsed['excerpt'],parsed['body'],entry,size,json.dumps(tags),report_id)
+                    db.execute('INSERT INTO reports VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',value)
+                    row=db.execute('SELECT * FROM reports WHERE id=?',(report_id,)).fetchone()
+                    db.execute('INSERT INTO report_versions VALUES (?,?,?,?,?)',(report_id,report_id,1,created,json.dumps(dict(row))))
                     db.execute('INSERT INTO reports_fts VALUES (?,?,?,?)',(report_id,title,parsed['body'],' '.join(tags)))
                     if watch_identity:
                         db.execute('INSERT OR REPLACE INTO watch_imports VALUES (?,?,?)',(*watch_identity,report_id))
@@ -263,11 +419,13 @@ class Library:
         return [self.public_share(dict(r)) for r in rows]
 
     def save_share(self,params,token=None):
+        if 'refresh_snapshot' in params and type(params['refresh_snapshot']) is not bool:
+            raise ValueError('Choose whether to refresh the snapshot.')
         with self.lock:
             previous=self.share(token,True) if token else None
-            reuse=previous and params.get('report_id',previous['report_id'])==previous['report_id']
+            reuse=previous and not params.get('refresh_snapshot',False) and params.get('report_id',previous['report_id'])==previous['report_id']
             report=({'id':previous['report_id'],'title':previous['title'],'entry':previous['entry']} if reuse
-                    else self.report(params.get('report_id')))
+                    else self.report(params.get('report_id',previous['report_id'] if previous else None)))
             expires=previous['expires_at'] if previous else None
             if 'expires_in_days' in params:
                 days=params['expires_in_days']
@@ -280,7 +438,7 @@ class Library:
             version=str(uuid.uuid4())
             destination=self.shares/token/version
             try:
-                source=self.shares/token/previous['version'] if reuse else self.reports/report['id']
+                source=self.shares/token/previous['version'] if reuse else self.package_path(report['id'])
                 copy_tree(source,destination)
                 validate_package(destination,report['entry'])
                 with self.db() as db:
@@ -298,9 +456,14 @@ class Library:
         with self.lock:
             self.report(report_id)
             # Remove files first: a storage failure leaves the catalogue recoverable.
-            folder=self.reports/report_id
-            if folder.exists(): shutil.rmtree(folder)
             with self.db() as db:
+                versions=db.execute('SELECT version FROM report_versions WHERE report_id=?',(report_id,)).fetchall()
+            for version in versions:
+                folder=self.reports/version['version']
+                if folder.is_symlink():raise OSError('Version storage cannot be a symlink.')
+                if folder.exists():shutil.rmtree(folder)
+            with self.db() as db:
+                db.execute('DELETE FROM report_versions WHERE report_id=?',(report_id,))
                 db.execute('DELETE FROM reports WHERE id=?',(report_id,))
                 db.execute('DELETE FROM reports_fts WHERE id=?',(report_id,))
                 db.execute('DELETE FROM watch_imports WHERE report_id=?',(report_id,))

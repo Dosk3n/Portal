@@ -191,7 +191,7 @@ class Watcher:
                                     if exists:
                                         try:
                                             report=self.library.report(exists['report_id'])
-                                            validate_package(self.library.reports/report['id'],report['entry'])
+                                            validate_package(self.library.package_path(report['id']),report['entry'])
                                             duplicate=True
                                         except (LookupError,OSError,ValueError):
                                             pass

@@ -57,11 +57,31 @@ assets/
 
 A multi-page ZIP needs `index.html` at the root. A ZIP containing just one HTML file may use another entry name. Limits: 50 MB uploaded, 200 MB expanded, 2,000 archive entries. Links to assets on another computer are not reconstructed. Hosted dependencies still require their providers. HTML scripts work inside an opaque-origin sandbox; browser storage and some APIs are unavailable. Never embed API keys or other credentials in reports.
 
+## Update reports
+
+Open a report and choose **Update** to upload revised HTML or a complete ZIP, edit its details, or view and restore a retained version. Revisions keep the same report link and library entry. Each revision replaces the whole package, including assets.
+
+Agents can revise a report using the same upload formats:
+
+```sh
+curl 'https://reports.example.com/api/reports/REPORT_ID/versions' \
+  -H "X-Api-Key: $PORTAL_API_KEY" \
+  -F 'file=@updated-report.zip'
+```
+
+For concurrent work, send `X-Report-Version` with the report's `current_version`; a stale update returns HTTP 409. Omitted collection, source, date and tags are preserved; a supplied title overrides the HTML title.
+
+- `GET /api/reports/{id}/versions`: retained versions, newest first, with preview links.
+- `POST /api/reports/{id}/restore`: JSON `version` (UUID), optionally `expected_version`. Restoring creates a new current version.
+- `PATCH /api/reports/{id}`: JSON title, source, topic, date or tags; optionally `expected_version`. Edits details without creating a content version.
+
+**Settings → Versions to keep** defaults to **3 total**: the current version and two previous versions. Set it to 1 to keep only the current version (maximum 100). Saving a lower limit immediately removes excess versions and their assets across the library; the website confirms how many will be removed. Increasing it allows future history to accumulate.
+
 ## Sharing
 
 Open a report and select **Share externally**. Choose an expiry in days (or no expiry), and optionally a password. Every report asset is subject to the same password, expiry, and revocation checks. Share passwords use a salted PBKDF2 hash; the API key intentionally remains retrievable.
 
-The Shares page lists snapshots, including expired links. **Update snapshot / access** can replace the report while keeping its URL and, unless explicitly changed, its password and expiry. A failed replacement preserves the old snapshot. Revocation removes its metadata and files. Expiry blocks access but leaves the snapshot available for renewal or revocation. Previously downloaded copies cannot be recalled.
+The Shares page lists snapshots, including expired links. **Update snapshot / access** can replace the report while keeping its URL and, unless explicitly changed, its password and expiry. To publish revisions of the same report, select **Update snapshot to the latest version of this report**, or PATCH the share with `refresh_snapshot: true`. Access-only edits keep the existing snapshot. Report retention never removes shared snapshots. A failed replacement preserves the old snapshot. Revocation removes its metadata and files. Expiry blocks access but leaves the snapshot available for renewal or revocation. Previously downloaded copies cannot be recalled.
 
 ## Folder imports
 

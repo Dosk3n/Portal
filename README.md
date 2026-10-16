@@ -20,6 +20,7 @@ Gift shortlists, house searches, travel plans, product comparisons, project upda
 
 - **Search and organise:** search report contents and filter by collection, tags, source or date.
 - **Upload your way:** add reports in the browser, send them through the API, or use optional watched folders.
+- **Revise without clutter:** update an existing report, with a configurable version history.
 - **Rich reports:** include images, charts and interactive elements in HTML or ZIP packages.
 - **Share on your terms:** create links with optional passwords and expiry dates, and revoke them whenever needed.
 - **Controlled snapshots:** update a shared report when you choose, keeping the same link.
@@ -63,7 +64,7 @@ curl 'https://portal.example.com/api/reports' \
   -F 'tags=gifts,cooking'
 ```
 
-For separate assets, send a ZIP with `index.html` at the top and relative links to its files. Each submission creates a new report and returns a private `reader_url`; sharing is a separate action. See the [API reference](docs/reference.md#submit-reports) for more options.
+For separate assets, send a ZIP with `index.html` at the top and relative links to its files. Each submission creates a new report and returns a private `reader_url`; sharing is a separate action. To revise an existing report, use its **Update** button or the [revision API](docs/reference.md#update-reports). Portal keeps three versions by default, adjustable in Settings. See the [API reference](docs/reference.md#submit-reports) for more options.
 
 ## Install with Docker
 

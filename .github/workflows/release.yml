@@ -51,13 +51,14 @@ jobs:
           node tests/browser.cjs
           node tests/refresh.cjs
           node tests/audit-regressions.cjs
+          node tests/revisions.cjs
       - name: Stop isolated app
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
   publish:
     needs: validate
-    if: startsWith(github.ref, 'refs/tags/v') && github.event.repository.private == true
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

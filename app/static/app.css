@@ -81,3 +81,16 @@ body.reader-mode { overflow: hidden; }
 }
 
 @media(max-width:760px) { :root[data-theme="dark"] .filter-panel { background:var(--green-light); } }
+
+/* Revision controls retain the full-height reader on narrow screens. */
+.reader-toolbar{height:auto;min-height:72px;flex-wrap:wrap}.reader-toolbar>button{white-space:nowrap}
+#report-edit-form .form-grid{margin-top:18px}
+@media(max-width:600px){
+ .reader-toolbar{grid-template-columns:auto auto 1fr auto}
+ .reader-toolbar .reader-info{grid-column:2 / 5;grid-row:1}
+ .reader-toolbar [data-report-options]{grid-column:1;grid-row:2;justify-self:start}
+ .reader-toolbar [data-delete-report]{grid-column:2;grid-row:2}
+ .reader-toolbar [data-new-share]{grid-column:3;grid-row:2}
+ .reader-toolbar .secondary-button{grid-column:4;grid-row:2}
+ .reader-toolbar>button{font-size:10px;padding:6px}
+}
