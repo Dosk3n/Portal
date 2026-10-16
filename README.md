@@ -1,93 +1,162 @@
-# Portal
+<p align="center">
+  <img src="app/static/branding/portal-logo.svg" alt="Portal" width="220">
+</p>
 
-A personal HTML report library with immediate API imports, manual uploads, full-text search, collections, tags, and controlled public snapshots. Agents create reports wherever they run and submit the finished HTML or ZIP package.
+# A home for the useful things your AI finds.
 
-## Run locally
+Portal turns a folder full of HTML reports into a library you can browse, search and share. Ask an AI agent to research something, save its findings as a web page, and send it to Portal for later.
 
-Requires Docker Compose v2. No npm or pip dependencies are needed by the application.
+> **Inspired by a good friend.** This project was heavily inspired by [Superfishintights](https://github.com/Superfishintights). I used his implementation as the starting point for my own version of Portal, adapting it to suit how I work. A big thank you for the idea and the foundation.
+
+![Portal's report library in light mode, showing sample reports organised into collections](docs/screenshots/library-light.png)
+
+*Real screenshots of Portal with fictional sample reports.*
+
+## What would I use it for?
+
+Anything you would like to keep as a readable report:
+
+- **Gift ideas:** compare options, keep useful links, and share a shortlist.
+- **House hunting:** collect research against your requirements in one place.
+- **Travel plans:** save an itinerary, ideas and notes for later.
+- **Project updates:** have an agent explain what it changed, what it checked, and what comes next.
+- **Everyday research:** keep product comparisons, guides and discoveries somewhere easier to revisit than a chat history.
+
+Portal stores and presents the finished reports. Your AI agent does the research and creates the HTML file—the web page that contains the report.
+
+## How it works
+
+1. **Create a report.** Write one yourself, or ask an AI agent to produce an HTML report.
+2. **Add it to Portal.** Upload it in your browser, have the agent send it directly, or use an optional watched folder.
+3. **Find it later.** Search the contents, browse collections, and filter by tags, source or date.
+4. **Share when ready.** Create a separate snapshot with an optional password and expiry date.
+
+Reports can include images, charts and interactive elements. Upload a single HTML file, or a ZIP containing the report and its assets.
+
+![An example HTML report open in Portal's full-height reader](docs/screenshots/report.png)
+
+## What you get
+
+| Feature | What it means for you |
+| --- | --- |
+| **Your own report library** | Keep reports on your own computer or server. |
+| **Search, collections and tags** | Find useful information without remembering its filename. |
+| **Three ways to add reports** | Browser uploads, direct submissions from agents, or watched folders. |
+| **Reports with their assets** | Keep images, styles and charts beside the report in a ZIP bundle. |
+| **Controlled sharing** | Set a password, choose when a link expires, or revoke it later. |
+| **Snapshots you control** | A shared report stays as you sent it until you explicitly update it. |
+| **Light and dark mode** | Switch from the menu; Portal remembers your choice in that browser. |
+| **Phone-friendly pages** | Browse your library and read reports on smaller screens. |
+| **A single agent API key** | View, copy or regenerate it in Settings. |
+
+<details>
+<summary>See Portal in dark mode</summary>
+
+![Portal's report library in dark mode](docs/screenshots/library-dark.png)
+
+</details>
+
+## For people
+
+Open **Upload**, choose an HTML file or ZIP, and select **Import report**. You can add a title, collection and tags to make it easier to find later.
+
+To share a report, open it and choose **Share externally**. You can set a password and an expiry, then copy the link. The recipient does not need access to your private library.
+
+A share is a **snapshot**, rather like sending a copy. When you are happy with a newer report, use **Shares → Update snapshot / access** to replace it while keeping the same link.
+
+<img src="docs/screenshots/sharing.png" alt="The sharing dialog, with expiry and optional password controls" width="560">
+
+## For AI agents
+
+You can ask your agent something like:
+
+> Research gift ideas for someone who enjoys cooking. Create a clear HTML report with a comparison of the options and links to your sources, then upload it to my Portal. Use the “Gift ideas” collection and appropriate tags.
+
+Give the agent your Portal address and the API key from **Settings** through its normal secure configuration. Keep the key out of the report itself.
+
+Agents can send reports from different computers and networks without a shared folder. Every API or manual submission creates a new private report; sharing is a separate choice.
+
+<details>
+<summary>Agent example: send a report with the API</summary>
+
+Use the actual Portal address in place of `https://portal.example.com`. Set `PORTAL_API_KEY` in the agent's environment to the key from Settings.
 
 ```sh
-mkdir -p data storage
-docker compose up --build -d
-```
-
-Open <http://localhost:8769>. The service binds only to loopback. Settings contains the generated, retrievable API key and the optional folder importer. There is no application login: remote installations must put the private UI behind their existing authentication proxy.
-
-The default container UID/GID is 1000. If your host account differs, set `PUID` and `PGID` in a private `.env`, or run Compose with `PUID=$(id -u) PGID=$(id -g)` on Unix. The host data/storage folders must be writable by that account; the application data directory is restricted to its owner.
-
-Run without Docker on Linux/macOS with Python 3.12+ and SQLite FTS5:
-
-```sh
-python3 app/server.py --data-dir ./data --storage-dir ./storage
-```
-
-## Submit reports
-
-Upload `.html`, `.htm`, `.xhtml`, or `.zip` in the browser, or send a request with the Settings API key:
-
-```sh
-curl 'https://reports.example.com/api/reports' \
+curl 'https://portal.example.com/api/reports' \
   -H "X-Api-Key: $PORTAL_API_KEY" \
-  -F 'file=@report.zip' \
-  -F 'topic=Research' \
-  -F 'source=Agent' \
-  -F 'tags=ideas,comparison'
+  -F 'file=@report.html' \
+  -F 'topic=Gift ideas' \
+  -F 'source=AI agent' \
+  -F 'tags=gifts,cooking'
 ```
 
-Each submission creates a new private report and returns `id`, `url`, and `reader_url`. Browser links require proxy authentication; keyed clients can retrieve content using `/api/reports/{id}/files/{path}`. Optional metadata fields are `title`, `source`, `topic` (collection), `date` (`YYYY-MM-DD`), and comma-separated `tags`. API documentation is returned by `/api/docs` with the same key. Regenerating the key immediately invalidates the old one; the key is stored in SQLite rather than environment configuration.
+Send `report.zip` instead if the report has separate images or other assets. Put `index.html` at the top of the ZIP and use relative links to its files.
 
-For a single-file report, embed CSS/JavaScript and optionally images directly. For a bundle, use relative paths:
+The response includes `reader_url`, the private report link. Read `/api/docs` with the same key, or see the [technical reference](docs/reference.md#submit-reports).
 
-```text
-index.html
-assets/
-  image.jpg
-  chart.svg
-  style.css
-```
+</details>
 
-A multi-page ZIP needs `index.html` at the root. A ZIP containing just one HTML file may use another entry name. Limits: 50 MB uploaded, 200 MB expanded, 2,000 archive entries. Links to assets on another computer are not reconstructed. Hosted dependencies still require their providers. HTML scripts work inside an opaque-origin sandbox; browser storage and some APIs are unavailable. Never embed API keys or other credentials in reports.
+## Install with Docker
 
-## Sharing
+You need a computer or server with **Docker and Docker Compose** installed. Portal runs in one container, with no separate database service to set up. Published images currently support **Linux on Intel/AMD 64-bit systems**.
 
-Open a report and select **Share externally**. Choose an expiry in days (or no expiry), and optionally a password. Every report asset is subject to the same password, expiry, and revocation checks. Share passwords use a salted PBKDF2 hash; the API key intentionally remains retrievable.
-
-The Shares page lists snapshots, including expired links. **Update snapshot / access** can replace the report while keeping its URL and, unless explicitly changed, its password and expiry. A failed replacement preserves the old snapshot. Revocation removes its metadata and files. Expiry blocks access but leaves the snapshot available for renewal or revocation. Previously downloaded copies cannot be recalled.
-
-## Folder imports
-
-Watching is disabled by default. Enable it in Settings and add one or more absolute, container-visible paths. Remove a location and add another to change paths. Previously imported reports are unaffected. Locations cannot overlap each other or application-managed storage.
-
-Inbox entries can be a standalone HTML file, ZIP bundle, or a folder containing one complete report package. For HTML plus assets, put all files in a separate submission folder; loose neighbouring images are not consumed. The importer checks every 5 seconds, waits for at least 10 seconds of unchanged size/mtime, validates and archives the submission, then removes its input. Failed imports stay in place with their error in Settings. Write to a temporary dot-prefixed name and rename when ready if producers may pause mid-copy longer than 10 seconds. A persistent import ledger prevents an unchanged submission being imported again after a failed deletion.
-
-## Deployment and storage
-
-See [deployment](docs/deployment.md), [architecture](docs/architecture.md), and the generic [Saltbox Compose example](compose.saltbox.example.yaml). This repository contains no deployment hostname, private host configuration, credentials, database, or reports. Runtime paths are ignored by Git and excluded from the image build context.
-
-## Validation
+**The image is currently private.** You need permission to pull it, and must sign in to `ghcr.io` using a GitHub username and a token with `read:packages` access:
 
 ```sh
-python3 -m unittest discover -s tests -v
-docker run --rm -v "$PWD/app/static:/src:ro" node:22-bookworm-slim node --check /src/app.js
+docker login ghcr.io
 ```
 
-Tests cover imports, asset containment, authentication boundaries, key rotation, snapshots, passwords, expiry, replacement, revocation, watcher consumption, and failed-import retention. Browser validation should also exercise uploads, report scripts, password-protected assets, settings, and mobile layout.
+Once you have access:
 
-## Source provenance
+**1. Create a folder for Portal** and save the following as `compose.yaml` inside it:
 
-The initial UI stylesheet and HTML metadata extraction were adapted from the HTML report portal supplied as the starting reference. The import/storage/API/sharing application and interface flows were developed for this project. Upstream redistribution rights should be confirmed before making adapted assets public; no new license is asserted over those materials. The current logo and browser icon use a native SVG redraw inspired by the supplied Portal artwork; see [branding](docs/branding.md).
+```yaml
+services:
+  portal:
+    image: ghcr.io/dosk3n/portal:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8769:8769"
+    environment:
+      PUBLIC_BASE_URL: http://localhost:8769
+    volumes:
+      - portal-data:/data
+      - portal-reports:/storage
 
-### Import validation and watcher activity
+volumes:
+  portal-data:
+  portal-reports:
+```
 
-Empty HTML and missing static local assets are rejected with an explanation. Bundle HTML,
-stylesheets, scripts and images together using relative paths. Remote URLs are not fetched
-or validated; dependencies generated dynamically by JavaScript are not preflighted.
+**2. Open a terminal in that folder** and start Portal:
 
-Manual and API submissions create new reports, including intentional duplicates. Watched
-folders skip identical content at the same path only when the existing report package is
-available. Changed content or a different filename creates a new report. Successful imports
-and duplicate skips consume the incoming file and appear in Settings → Recent imports.
-Use Refresh activity to fetch the latest watcher status. Invalid inputs stay in the inbox.
+```sh
+docker compose up -d
+```
 
-Reports can be deleted from the reader after confirmation. Shared snapshots remain available
-and their access settings can still be edited. Revoke those links separately when needed.
+**3. Open [http://localhost:8769](http://localhost:8769)** on that computer. You are ready to upload your first report. Docker keeps the settings and reports in persistent volumes between container restarts and updates.
+
+This setup is for use on the same computer. **Portal has no built-in login.** To use it remotely or make share links available to other people, put it behind your existing HTTPS and authentication setup. The library stays protected; the keyed API and controlled share links have their own access rules. Follow the [server deployment guide](docs/deployment.md) for that setup, including [Saltbox and Traefik](compose.saltbox.example.yaml).
+
+To update, run these from the same folder:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+For an installation from source, custom storage locations, backups and other options, see the guides below.
+
+## Prefer a shared folder?
+
+Folder watching is optional and **off by default**. Enable it in **Settings**, then add a folder that Portal can access. For a NAS or another host folder, mount it into the container first; see the [folder import notes](docs/reference.md#folder-imports).
+
+Portal checks for completed files, imports them, and removes the incoming copy after success. Failed files stay in place so you can correct them. Exact duplicates at the same path are skipped only when the existing report is still available, and the result appears in **Recent imports**.
+
+## More help
+
+- [Technical reference](docs/reference.md) — report packages, API use, sharing, folder imports and running from source.
+- [Server deployment](docs/deployment.md) — remote access, authentication, storage, backups and updates.
+- [Architecture](docs/architecture.md) — how Portal is put together.
+- [Validation](docs/validation.md) — how to run the development checks.
+- [Source credits and provenance](docs/reference.md#source-provenance) — notes on the starting implementation and adapted materials.
