@@ -98,14 +98,6 @@ The response includes `reader_url`, the private report link. Read `/api/docs` wi
 
 You need a computer or server with **Docker and Docker Compose** installed. Portal runs in one container, with no separate database service to set up. Published images currently support **Linux on Intel/AMD 64-bit systems**.
 
-**The image is currently private.** You need permission to pull it, and must sign in to `ghcr.io` using a GitHub username and a token with `read:packages` access:
-
-```sh
-docker login ghcr.io
-```
-
-Once you have access:
-
 **1. Create a folder for Portal** and save the following as `compose.yaml` inside it:
 
 ```yaml
