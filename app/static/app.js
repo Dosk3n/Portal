@@ -66,7 +66,7 @@
     if(id!==generation)return;
     const options=(items,value,label)=>`<option value="">${label}</option>`+items.map(item=>`<option value="${esc(item.name)}"${value===item.name?' selected':''}>${esc(item.name)} (${item.count})</option>`).join('');
     document.title='Report library · Portal';
-    main.innerHTML=heading('All your reports. One place.','Research, discoveries, and decisions. Saved for later.','<a class="primary-button" href="/upload" data-nav>＋ Add report</a>')+
+    main.innerHTML=heading('All your reports. One place.','Research, discoveries, and decisions. Saved for later.','<a class="primary-button" href="/upload" data-nav>+ Add report</a>')+
       `<div class="search-strip"><form class="search-box" id="search-form" role="search"><label class="sr-only" for="search">Search titles, contents and tags</label><span aria-hidden="true">⌕</span><input type="search" id="search" placeholder="Search titles, contents and tags…" value="${esc(p.get('q')||'')}" autocomplete="off"><kbd>/</kbd></form><button class="filter-toggle" id="filters-toggle" aria-expanded="false" aria-controls="filter-panel">Filters</button></div>
       <div class="library-layout"><aside class="filter-panel" id="filter-panel"><div class="filter-heading"><h2>Refine your library</h2><button class="text-button" data-reset>Reset</button></div><div class="filter-fields">
       <div class="field"><label for="topic">Collection</label><select id="topic" data-filter="topic">${options(facets.topics,p.get('topic'),'All collections')}</select></div>
@@ -189,6 +189,6 @@
   });
   document.addEventListener('keydown',event=>{if(event.key==='/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName) && document.getElementById('search')){event.preventDefault();document.getElementById('search').focus();}});
   window.addEventListener('popstate',render);
-  setInterval(()=>{if(location.pathname==='/' && !dialog.open && !['INPUT','SELECT'].includes(document.activeElement.tagName))render();},30000);
+  setInterval(()=>{if(location.pathname==='/' && window.scrollY<100 && !dialog.open && !['INPUT','SELECT'].includes(document.activeElement.tagName))render();},30000);
   render();
 })();

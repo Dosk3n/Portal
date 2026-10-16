@@ -13,6 +13,8 @@ docker compose up --build -d
 
 Open <http://localhost:8769>. The service binds only to loopback. Settings contains the generated, retrievable API key and the optional folder importer. There is no application login: remote installations must put the private UI behind their existing authentication proxy.
 
+The default container UID/GID is 1000. If your host account differs, set `PUID` and `PGID` in a private `.env`, or run Compose with `PUID=$(id -u) PGID=$(id -g)` on Unix. The host data/storage folders must be writable by that account; the application data directory is restricted to its owner.
+
 Run without Docker on Linux/macOS with Python 3.12+ and SQLite FTS5:
 
 ```sh

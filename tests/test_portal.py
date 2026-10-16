@@ -11,6 +11,7 @@ import time
 import unittest
 from urllib.parse import urlencode
 import zipfile
+from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
 from library import Library
@@ -189,6 +190,40 @@ class PortalTests(unittest.TestCase):
         shutil.rmtree(self.lib.reports/self.report['id'])
         with self.assertRaises(OSError):self.lib.save_share({},share['token'])
         self.assertEqual(self.request(share['url']+'files/index.html')[0],200)
+
+    def test_zip_symlinks_duplicate_paths_and_resource_limits(self):
+        target=io.BytesIO()
+        with zipfile.ZipFile(target,'w') as archive:
+            item=zipfile.ZipInfo('link.html');item.create_system=3;item.external_attr=0o120777<<16
+            archive.writestr(item,'/outside')
+        with self.assertRaises(ValueError):self.lib.import_report(target.getvalue(),'bad.zip')
+        with patch('library.MAX_FILES',1),self.assertRaises(ValueError):
+            self.lib.import_report(bundle({'index.html':'a','asset.txt':'b'}),'large.zip')
+        with patch('library.MAX_EXPANDED',1),self.assertRaises(ValueError):
+            self.lib.import_report(bundle({'index.html':'longer than limit'}),'large.zip')
+        self.assertEqual(self.lib.search({})['total'],1)
+
+    def test_changed_watcher_input_is_retained(self):
+        inbox=self.base/'inbox';inbox.mkdir();path=inbox/'changing.html';path.write_text('<title>First</title>')
+        self.lib.add_watcher(str(inbox));self.lib.set_setting('watching_enabled',True)
+        original=self.lib.import_report
+        def change_after_import(*args,**kwargs):
+            report=original(*args,**kwargs);path.write_text('<title>Changed while importing</title>');return report
+        watcher=Watcher(self.lib,stable_seconds=0);watcher.scan()
+        with patch.object(self.lib,'import_report',side_effect=change_after_import):watcher.scan()
+        self.assertTrue(path.exists())
+        self.assertIn('changed during import',self.lib.settings()['watchers'][0]['error'])
+
+    def test_password_session_expiry_and_rate_limit(self):
+        share=self.lib.save_share({'report_id':self.report['id'],'password':'example'})
+        session=self.lib.unlock(share['token'],'example')
+        asset=share['url']+'session/'+session+'/files/assets/image.svg'
+        self.assertEqual(self.request(asset)[0],200)
+        with self.lib.db() as db:db.execute('UPDATE share_sessions SET expires_at=?',(time.time()-1,))
+        self.assertEqual(self.request(asset)[0],403)
+        for _ in range(10):
+            self.request(share['url']+'unlock','POST','password=incorrect',{'Content-Type':'application/x-www-form-urlencoded'})
+        self.assertEqual(self.request(share['url']+'unlock','POST','password=example',{'Content-Type':'application/x-www-form-urlencoded'})[0],429)
 
 
 if __name__=='__main__':unittest.main()

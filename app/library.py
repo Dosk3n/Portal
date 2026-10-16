@@ -44,6 +44,9 @@ class Library:
         self.data = Path(data_dir).resolve()
         self.storage = Path(storage_dir).resolve()
         self.data.mkdir(parents=True, exist_ok=True)
+        # The retrievable API key lives in SQLite. Restrict its containing
+        # directory on POSIX filesystems; deployment ownership must match UID.
+        self.data.chmod(0o700)
         self.reports = self.storage / 'reports'
         self.shares = self.storage / 'shares'
         self.reports.mkdir(parents=True, exist_ok=True)
