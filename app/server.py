@@ -1,6 +1,7 @@
 """Portal HTTP boundaries: private browser UI, keyed API, public snapshots."""
 from __future__ import annotations
 import argparse
+import errno
 from email.parser import BytesParser
 from email.policy import default
 import hashlib
@@ -14,7 +15,7 @@ import os
 from pathlib import Path
 import re
 import secrets
-import shutil
+import socket
 import sqlite3
 import threading
 import time
@@ -23,6 +24,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 from library import Library, MAX_UPLOAD, identifier
 from settings import canonical_origin
 from watcher import Watcher
+from safe_files import open_regular
 
 STATIC=Path(__file__).parent/'static'
 SANDBOX="sandbox allow-scripts allow-forms allow-downloads allow-popups allow-modals; frame-ancestors 'self'"
@@ -30,13 +32,47 @@ SANDBOX="sandbox allow-scripts allow-forms allow-downloads allow-popups allow-mo
 
 class PortalServer(ThreadingHTTPServer):
     daemon_threads=True
+    request_queue_size=16
     def __init__(self,address,library,base_url=None):
         self.library=library
         self.base_url=canonical_origin(base_url) if base_url else None
         self.attempts={}
         self.attempt_lock=threading.Lock()
         self.upload_slots=threading.BoundedSemaphore(3)
+        self.request_slots=threading.BoundedSemaphore(32)
         super().__init__(address,Handler)
+
+    def process_request(self,request,client_address):
+        if not self.request_slots.acquire(blocking=False):
+            try:
+                request.settimeout(.2)
+                request.sendall(b'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\nRetry-After: 2\r\n\r\n')
+            except OSError: pass
+            finally: self.shutdown_request(request)
+            return
+        try: super().process_request(request,client_address)
+        except Exception:
+            self.request_slots.release()
+            raise
+
+    def process_request_thread(self,request,client_address):
+        try: super().process_request_thread(request,client_address)
+        finally: self.request_slots.release()
+
+    def trusted_host(self,host):
+        if not host:return False
+        allowed=set()
+        if self.base_url:allowed.add(urlsplit(self.base_url).netloc)
+        address,port=self.server_address[:2]
+        for name in {'localhost','127.0.0.1','[::1]',address}:
+            if name in {'0.0.0.0','::'}:continue
+            allowed.add(name+(':'+str(port) if port!=80 else ''))
+        # Canonicalisation removes standard ports and rejects credentials/path syntax.
+        for scheme in ('http','https'):
+            try:
+                if urlsplit(canonical_origin(scheme+'://'+host)).netloc in allowed:return True
+            except ValueError:pass
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -90,11 +126,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def body(self,maximum=16384):
         if self.headers.get('Transfer-Encoding'):raise ValueError('Chunked requests are not supported.')
+        if len(self.headers.get_all('Content-Length',[]))>1:raise ValueError('Ambiguous request length.')
         length=int(self.headers.get('Content-Length','0'))
         if length<0 or length>maximum:raise ValueError('Request is too large.')
-        value=self.rfile.read(length)
-        if len(value)!=length:raise ValueError('Incomplete request body.')
-        return value
+        chunks=[];remaining=length;deadline=time.monotonic()+60
+        try:
+            while remaining:
+                timeout=deadline-time.monotonic()
+                if timeout<=0:raise ValueError('Request body timed out.')
+                self.connection.settimeout(timeout)
+                chunk=self.rfile.read1(min(65536,remaining))
+                if not chunk:raise ValueError('Incomplete request body.')
+                chunks.append(chunk);remaining-=len(chunk)
+        except (TimeoutError,socket.timeout):raise ValueError('Request body timed out.') from None
+        finally:self.connection.settimeout(60)
+        return b''.join(chunks)
 
     def json_body(self):
         if self.headers.get_content_type()!='application/json':raise ValueError('Expected application/json.')
@@ -123,6 +169,10 @@ class Handler(BaseHTTPRequestHandler):
             self.error(500,'The request could not be completed.')
 
     def route(self):
+        if not self.server.trusted_host(self.headers.get('Host')):
+            return self.error(421,'Use the configured Portal address.')
+        if len(self.headers.get_all('Host',[]))!=1:
+            return self.error(400,'Use a single Host header.')
         parsed=urlsplit(self.path)
         path=unquote(parsed.path)
         params={k:v[-1] for k,v in parse_qs(parsed.query).items()}
@@ -139,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
         api=path=='/api' or path.startswith('/api/')
         if api:
             key=self.headers.get('X-Api-Key','')
-            if not key or not hmac.compare_digest(key,self.server.library.setting('api_key')):
+            if not key or not hmac.compare_digest(key.encode(),self.server.library.setting('api_key').encode()):
                 return self.error(401,'A valid X-Api-Key header is required.')
             suffix=path.removeprefix('/api')
         elif path.startswith('/internal/'):
@@ -303,27 +353,40 @@ class Handler(BaseHTTPRequestHandler):
         self.send(403 if failed else 200,body.encode(),'text/html; charset=utf-8')
 
     def file(self,root,relative,sandbox=False):
-        root=root.resolve();target=(root/relative).resolve()
-        if not target.is_relative_to(root):raise LookupError('File not found.')
-        if target.is_dir():target=target/'index.html'
-        if not target.is_file():raise LookupError('File not found.')
-        mime=mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
-        if mime.startswith('text/'):mime+='; charset=utf-8'
-        # Stream large assets instead of loading packages into memory.
-        with target.open('rb') as stream:
+        # Descriptor-relative opens reject links in every component, including
+        # a directory index; keep the verified descriptor through the response.
+        try:
+            context=open_regular(root,relative,index=True)
+            stream=context.__enter__()
+        except (FileNotFoundError,NotADirectoryError,ValueError):
+            raise LookupError('File not found.') from None
+        except OSError as error:
+            if error.errno==errno.ELOOP:raise LookupError('File not found.') from None
+            raise
+        try:
+            filename=stream.portal_filename
+            mime=mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+            if mime.startswith('text/'):mime+='; charset=utf-8'
+            size=os.fstat(stream.fileno()).st_size
             self.send_response(200)
-            for key,value in {'Content-Type':mime,'Content-Length':str(os.fstat(stream.fileno()).st_size),
+            for key,value in {'Content-Type':mime,'Content-Length':str(size),
                               'Cache-Control':'no-store' if sandbox else 'no-cache','X-Content-Type-Options':'nosniff',
                               'Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow, noarchive'}.items():self.send_header(key,value)
             if sandbox:self.send_header('Content-Security-Policy',SANDBOX)
             elif mime.startswith('text/html'):self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'")
             self.end_headers()
-            if self.command!='HEAD':shutil.copyfileobj(stream,self.wfile)
+            if self.command!='HEAD':
+                remaining=size
+                while remaining:
+                    chunk=stream.read(min(65536,remaining))
+                    if not chunk:break
+                    self.wfile.write(chunk);remaining-=len(chunk)
+        finally:context.__exit__(None,None,None)
 
 
 API_DOCS={'version':'1.0.0','authentication':'X-Api-Key header. Manage the single key in browser Settings.',
  'endpoints':{'GET /api/reports':'Search with q, source, topic, tag, from, to, sort, page, limit.',
- 'GET /api/reports/{id}':'Report metadata. Browser reader_url requires Authelia.',
+ 'GET /api/reports/{id}':'Report metadata. Browser reader_url uses private library access.',
  'GET /api/reports/{id}/files/{path}':'Download report content with API key.',
  'POST /api/reports':'Multipart file + optional title, source, topic, date (YYYY-MM-DD), tags (comma separated). Or raw text/html or application/zip with optional X-Filename and X-Report-* headers.',
  'GET /api/facets':'Collections, sources, tags and counts.',

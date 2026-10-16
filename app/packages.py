@@ -2,9 +2,11 @@
 from html.parser import HTMLParser
 from pathlib import Path
 import re
+import os
+import posixpath
 from urllib.parse import unquote, urljoin, urlsplit
 
-from metadata import read_text
+from safe_files import iter_files, read_regular
 
 
 class References(HTMLParser):
@@ -38,17 +40,24 @@ class References(HTMLParser):
 
 
 def validate_package(root, entry):
-    root = Path(root).resolve()
-    source = root / entry
-    if not source.is_file():
+    root = Path(os.path.abspath(root))
+    files = set(iter_files(root))
+    if entry not in files:
         raise FileNotFoundError('The report entry file is unavailable. Restore it before sharing.')
-    if not read_text(source).strip():
+    def text_file(relative):
+        raw = read_regular(root, relative)
+        try:
+            return raw.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            return raw.decode('windows-1252', errors='replace')
+    if not text_file(entry).strip():
         raise ValueError('The report HTML is empty. Add content before importing.')
     missing = set()
-    for path in root.rglob('*'):
-        if not path.is_file() or path.suffix.lower() not in {'.html', '.htm', '.xhtml', '.css'}:
+    for name in sorted(files):
+        path = Path(name)
+        if path.suffix.lower() not in {'.html', '.htm', '.xhtml', '.css'}:
             continue
-        text = read_text(path)
+        text = text_file(name)
         base = ''
         links = []
         if path.suffix.lower() != '.css':
@@ -71,8 +80,8 @@ def validate_package(root, entry):
             relative = unquote(url.path)
             if not relative:
                 continue
-            target = (path.parent / relative).resolve()
-            if not target.is_relative_to(root) or not target.is_file():
+            target = posixpath.normpath(posixpath.join(path.parent.as_posix(), relative))
+            if target not in files:
                 missing.add(link)
     if missing:
         names = ', '.join(sorted(missing)[:8])

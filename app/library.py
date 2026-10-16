@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 from metadata import MetadataParser, read_text
 from packages import validate_package
+from safe_files import copy_tree
 
 MAX_UPLOAD = 50 * 1024 * 1024
 MAX_EXPANDED = 200 * 1024 * 1024
@@ -219,7 +220,7 @@ class Library:
             size=sum(p.stat().st_size for p in stage.rglob('*') if p.is_file())
             destination=self.reports/report_id
             try:
-                shutil.copytree(stage,destination)
+                copy_tree(stage,destination)
                 with self.db() as db:
                     db.execute('INSERT INTO reports VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                                (report_id,title,source,topic,date,now(),parsed['excerpt'],parsed['body'],entry,size,json.dumps(tags)))
@@ -280,7 +281,7 @@ class Library:
             destination=self.shares/token/version
             try:
                 source=self.shares/token/previous['version'] if reuse else self.reports/report['id']
-                shutil.copytree(source,destination)
+                copy_tree(source,destination)
                 validate_package(destination,report['entry'])
                 with self.db() as db:
                     db.execute('INSERT OR REPLACE INTO shares VALUES (?,?,?,?,?,?,?,?,?)',
@@ -311,14 +312,17 @@ class Library:
         if identifier(token): shutil.rmtree(self.shares/token,ignore_errors=True)
 
     def unlock(self,token,password):
-        share=self.share(token)
-        if not share['password'] or not self.check_password(password,share['password']): return None
-        session=secrets.token_urlsafe(32)
-        with self.db() as db:
-            db.execute('DELETE FROM share_sessions WHERE expires_at<?',(time.time(),))
-            db.execute('INSERT INTO share_sessions VALUES (?,?,?)',
-                       (hashlib.sha256(session.encode()).hexdigest(),token,min(time.time()+43200,share['expires_at'] or float('inf'))))
-        return session
+        # A password change or revocation must invalidate every preceding
+        # password check, including checks which are still in progress.
+        with self.lock:
+            share=self.share(token)
+            if not share['password'] or not self.check_password(password,share['password']): return None
+            session=secrets.token_urlsafe(32)
+            with self.db() as db:
+                db.execute('DELETE FROM share_sessions WHERE expires_at<?',(time.time(),))
+                db.execute('INSERT INTO share_sessions VALUES (?,?,?)',
+                           (hashlib.sha256(session.encode()).hexdigest(),token,min(time.time()+43200,share['expires_at'] or float('inf'))))
+            return session
 
     def unlocked(self,token,session):
         with self.db() as db:
