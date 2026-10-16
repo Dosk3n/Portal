@@ -28,3 +28,56 @@ body.reader-mode { overflow: hidden; }
   .reader-toolbar [data-new-share] { grid-column:2; grid-row:2; justify-self:end; }
   .reader-toolbar .secondary-button { grid-column:3; grid-row:2; }
 }
+
+/* Theme controls and dark surfaces retain Portal's green palette. */
+.theme-toggle { width:36px; height:36px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--green); align-self:center; }
+.theme-toggle:hover { background:var(--green-light); }
+.theme-sun { display:none; }
+:root[data-theme="dark"] .theme-moon { display:none; }
+:root[data-theme="dark"] .theme-sun { display:block; }
+:root[data-theme="dark"] { color-scheme:dark; --paper:#15211d; --card:#1e2d27; --ink:#e4ece5; --body:#c3cfc5; --muted:#a3b5a8; --green:#a5c9ac; --green-light:#2b4035; --line:#3b5044; --warm:#e1a58a; }
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .secondary-button,
+:root[data-theme="dark"] .filter-toggle,
+:root[data-theme="dark"] .field input,
+:root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .field textarea,
+:root[data-theme="dark"] .sort-field select,
+:root[data-theme="dark"] .key-row input,
+:root[data-theme="dark"] .share-url,
+:root[data-theme="dark"] .report-choice,
+:root[data-theme="dark"] .page-link { background:var(--card); color:var(--ink); }
+:root[data-theme="dark"] .primary-button,
+:root[data-theme="dark"] .skip-link,
+:root[data-theme="dark"] #toast { background:var(--green); color:#15211d; }
+:root[data-theme="dark"] .primary-button:hover { background:#bedac3; }
+:root[data-theme="dark"] .secondary-button:hover,
+:root[data-theme="dark"] .page-link:hover,
+:root[data-theme="dark"] .report-choice[aria-pressed=true],
+:root[data-theme="dark"] .drop-zone { background:var(--green-light); }
+:root[data-theme="dark"] .state-panel { background:var(--card); border-color:var(--line); }
+:root[data-theme="dark"] .search-box { border-color:var(--line); }
+:root[data-theme="dark"] .card-excerpt,
+:root[data-theme="dark"] .page-footer { color:var(--muted); }
+:root[data-theme="dark"] .card-footer { border-color:var(--line); }
+:root[data-theme="dark"] .tag-pill,
+:root[data-theme="dark"] .topic-tag,
+:root[data-theme="dark"] .badge { background:var(--green-light); color:var(--green); }
+:root[data-theme="dark"] .report-card:hover h3 { color:var(--green); }
+.brand-logo .brand-dark { display:none; }
+:root[data-theme="dark"] .brand-logo .brand-light { display:none; }
+:root[data-theme="dark"] .brand-logo .brand-dark { display:block; }
+:root[data-theme="dark"] .error,
+:root[data-theme="dark"] .danger { color:#ffb6a4!important; }
+:root[data-theme="dark"] #upload-status.error,
+:root[data-theme="dark"] .badge.expired { background:#462d29; color:#ffb6a4; }
+@media(max-width:480px) {
+  .header-inner { flex-wrap:wrap; gap:0 12px; padding-top:10px; padding-bottom:8px; }
+  .top-nav { gap:14px; }
+  .theme-toggle { width:36px; height:40px; }
+}
+@media(max-width:380px) {
+  .top-nav { width:100%; justify-content:space-between; margin-top:4px; }
+}
+
+@media(max-width:760px) { :root[data-theme="dark"] .filter-panel { background:var(--green-light); } }

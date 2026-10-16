@@ -24,7 +24,9 @@ jobs:
       - name: Unit and HTTP integration tests
         run: python3 -m unittest discover -s tests -v
       - name: JavaScript syntax
-        run: node --check app/static/app.js
+        run: |
+          node --check app/static/app.js
+          node --check app/static/theme.js
       - name: Build and start isolated local app
         run: |
           mkdir -p data storage/inbox

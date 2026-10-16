@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 158 44" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Portal</title>
+  <defs>
+    <linearGradient id="portal" x1="7" y1="43" x2="38" y2="4" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#426e58"/>
+      <stop offset=".55" stop-color="#608c71"/>
+      <stop offset="1" stop-color="#9cbd9e"/>
+    </linearGradient>
+    <linearGradient id="door" x1="9" y1="26" x2="22" y2="26" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#193e32"/>
+      <stop offset="1" stop-color="#2c5c48"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="15" y1="13" x2="34" y2="34" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fffefb"/>
+      <stop offset="1" stop-color="#edf2ec"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(0 0) scale(.9)">
+    <path d="M10 3h16C38 3 45 10 45 21S38 38 26 38h-5L8 45c-2 1-4-.5-4-3V9c0-3.3 2.7-6 6-6Z" fill="url(#portal)"/>
+    <path d="m13 12 19 4c2.4.5 4 2.5 4 5v9.5c0 2-1.2 3.8-3.1 4.4L21 39V22c0-1.5-.6-2.8-1.8-3.7L13 12Z" fill="url(#paper)"/>
+    <path d="M13 12c-2-.4-3 .8-3 2.5V44l11-7V22c0-1.5-.6-2.8-1.8-3.7L13 12Z" fill="url(#door)"/>
+    <path d="m26 22 6-1m-6 7 6-1m-6 7 6-1" stroke="#afc7ae" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+  <text x="52" y="29" fill="#c3dcc8" font-family="system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="20" font-weight="700" letter-spacing="2">PORTAL</text>
+</svg>
