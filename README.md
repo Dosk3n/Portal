@@ -45,7 +45,7 @@ To share, open a report and choose **Share externally**. Set an optional passwor
 
 ## Using Portal with AI agents
 
-Copy the API key from **Settings** and give it to your agent with your Portal address. Agents can submit reports from different computers and networks without a shared folder.
+Copy the API key from **Settings** and give it to your agent with your Portal address. Agents can submit reports from different computers and networks without a shared folder. Using Nexus? The [Portal tool pack](integrations/nexus/README.md) adds report creation, updates, search and sharing tools.
 
 Example request:
 
