@@ -1,0 +1,21 @@
+services:
+  portal:
+    build: .
+    image: portal:local
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "127.0.0.1:${PORTAL_PORT:-8769}:8769"
+    environment:
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:8769}"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - ./data:/data
+      - ./storage:/storage
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
