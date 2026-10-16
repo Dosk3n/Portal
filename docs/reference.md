@@ -9,18 +9,25 @@ A personal HTML report library with immediate API imports, manual uploads, full-
 Requires Docker Compose v2. No npm or pip dependencies are needed by the application.
 
 ```sh
-mkdir -p data storage
-docker compose up --build -d
+mkdir -p portal-data portal-reports
+docker compose up -d
 ```
 
 Open <http://localhost:8769>. The service binds only to loopback. Settings contains the generated, retrievable API key and the optional folder importer. There is no application login: remote installations must put the private UI behind their existing authentication proxy.
 
-The default container UID/GID is 1000. If your host account differs, set `PUID` and `PGID` in a private `.env`, or run Compose with `PUID=$(id -u) PGID=$(id -g)` on Unix. The host data/storage folders must be writable by that account; the application data directory is restricted to its owner.
+The default container UID/GID is 1000. If your host account differs, set `PUID` and `PGID` in a private `.env`, or run Compose with `PUID=$(id -u) PGID=$(id -g)` on Unix. The host portal-data/portal-reports folders must be writable by that account; the application data directory is restricted to its owner.
 
 Run without Docker on Linux/macOS with Python 3.12+ and SQLite FTS5:
 
 ```sh
 python3 app/server.py --data-dir ./data --storage-dir ./storage
+```
+
+To build from source instead of using the published image, run these commands from the repository root:
+
+```sh
+mkdir -p portal-data portal-reports
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
 ## Submit reports
@@ -64,7 +71,7 @@ Inbox entries can be a standalone HTML file, ZIP bundle, or a folder containing 
 
 ## Deployment and storage
 
-See [deployment](deployment.md), [architecture](architecture.md), and the generic [Saltbox Compose example](../compose.saltbox.example.yaml). This repository contains no deployment hostname, private host configuration, credentials, database, or reports. Runtime paths are ignored by Git and excluded from the image build context.
+See the [setup guide](deployment.md), [Compose file](../docker-compose.yml) and [architecture](architecture.md). This repository contains no deployment hostname, private host configuration, credentials, database, or reports. Runtime paths are ignored by Git and excluded from the image build context.
 
 ## Validation
 

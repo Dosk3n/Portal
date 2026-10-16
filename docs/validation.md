@@ -5,8 +5,8 @@ Run unit/integration tests with `python3 -m unittest discover -s tests -v`.
 The browser test creates synthetic reports/shares, regenerates the development API key, and adds an inbox location. Run it only against isolated development data, never a production library.
 
 ```sh
-mkdir -p data storage/inbox
-docker compose up --build -d
+mkdir -p portal-data portal-reports/inbox
+PUID=$(id -u) PGID=$(id -g) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 npm install --prefix /tmp/portal-browser --no-audit --no-fund playwright@1.56.1
 /tmp/portal-browser/node_modules/.bin/playwright install --with-deps chromium
 export NODE_PATH=/tmp/portal-browser/node_modules

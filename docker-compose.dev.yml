@@ -1,0 +1,6 @@
+# Optional override for contributors building from source.
+# docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+services:
+  portal:
+    build: .
+    image: portal:local

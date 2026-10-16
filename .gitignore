@@ -1,10 +1,15 @@
 data/
 storage/
+/portal-data/
+/portal-reports/
+/portal-watched/
 .env
 .env.*
 !.env.example
 compose.override.yaml
 compose.site.yaml
+docker-compose.override.yml
+docker-compose.site.yml
 *.pem
 *.key
 *.p12

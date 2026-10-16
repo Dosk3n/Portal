@@ -98,35 +98,33 @@ The response includes `reader_url`, the private report link. Read `/api/docs` wi
 
 You need a computer or server with **Docker and Docker Compose** installed. Portal runs in one container, with no separate database service to set up. Published images currently support **Linux on Intel/AMD 64-bit systems**.
 
-**1. Create a folder for Portal** and save the following as `compose.yaml` inside it:
+**1. Create a folder for Portal** and save the following as `docker-compose.yml` inside it:
 
 ```yaml
 services:
   portal:
     image: ghcr.io/dosk3n/portal:latest
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
     ports:
       - "127.0.0.1:8769:8769"
     environment:
       PUBLIC_BASE_URL: http://localhost:8769
     volumes:
-      - portal-data:/data
-      - portal-reports:/storage
-
-volumes:
-  portal-data:
-  portal-reports:
+      - ./portal-data:/data
+      - ./portal-reports:/storage
 ```
 
-**2. Open a terminal in that folder** and start Portal:
+**2. Open a terminal in that folder**, create the storage folders, and start Portal:
 
 ```sh
+mkdir -p portal-data portal-reports
 docker compose up -d
 ```
 
-**3. Open [http://localhost:8769](http://localhost:8769)** on that computer. You are ready to upload your first report. Docker keeps the settings and reports in persistent volumes between container restarts and updates.
+**3. Open [http://localhost:8769](http://localhost:8769)** on that computer. You are ready to upload your first report. Your settings stay in `portal-data`, and your reports and shared snapshots stay in `portal-reports`, beside `docker-compose.yml`. These folders survive container restarts and updates. On Linux, see [folder permissions](docs/deployment.md#folder-permissions) if your account uses a different user ID.
 
-This setup is for use on the same computer. **Portal has no built-in login.** To use it remotely or make share links available to other people, put it behind your existing HTTPS and authentication setup. The library stays protected; the keyed API and controlled share links have their own access rules. Follow the [server deployment guide](docs/deployment.md) for that setup, including [Saltbox and Traefik](compose.saltbox.example.yaml).
+This setup is for use on the same computer. **Portal has no built-in login.** To use it remotely or make share links available to other people, put it behind your existing HTTPS and authentication setup. The library stays protected; the keyed API and controlled share links have their own access rules. See the [setup guide](docs/deployment.md) for storage, backups and remote-access notes.
 
 To update, run these from the same folder:
 

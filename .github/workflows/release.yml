@@ -29,14 +29,14 @@ jobs:
           node --check app/static/theme.js
       - name: Build and start isolated local app
         run: |
-          mkdir -p data storage/inbox
+          mkdir -p portal-data portal-reports/inbox
           export PUID="$(id -u)" PGID="$(id -g)"
-          docker compose up --build -d
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
           for attempt in $(seq 1 30); do
             if curl -fsS http://localhost:8769/health; then exit 0; fi
             sleep 1
           done
-          docker compose logs
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml logs
           exit 1
       - name: Install isolated browser test dependencies
         run: |
@@ -53,7 +53,7 @@ jobs:
           node tests/audit-regressions.cjs
       - name: Stop isolated app
         if: always()
-        run: docker compose down
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
   publish:
     needs: validate
