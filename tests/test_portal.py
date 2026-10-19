@@ -92,6 +92,8 @@ class PortalTests(unittest.TestCase):
 
     def test_reader_assets_sandbox_and_containment(self):
         status,headers,body=self.request(self.report['url'])
+        self.assertEqual(status,302)
+        status,headers,body=self.request(headers['Location'],headers={'X-Portal-Public':'1'})
         self.assertEqual(status,200);self.assertIn(b'dataset.interactive',body)
         self.assertIn('sandbox allow-scripts',headers['Content-Security-Policy'])
         self.assertNotIn('allow-same-origin',headers['Content-Security-Policy'])
@@ -208,7 +210,9 @@ class PortalTests(unittest.TestCase):
     def test_single_page_bundle_entry_url_encodes_reserved_characters(self):
         report=self.lib.import_report(bundle({'a #1.html':'<title>Special filename</title>'}),'single.zip')
         self.assertIn('a%20%231.html',report['url'])
-        self.assertEqual(self.request(report['url'])[0],200)
+        status,headers,_=self.request(report['url'])
+        self.assertEqual(status,302)
+        self.assertEqual(self.request(headers['Location'])[0],200)
 
     def test_changed_watcher_input_is_retained(self):
         inbox=self.base/'inbox';inbox.mkdir();path=inbox/'changing.html';path.write_text('<title>First</title>')

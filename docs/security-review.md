@@ -21,3 +21,22 @@ Report scripts and external resources remain supported inside an opaque-origin s
 ## Storage mount aliases
 
 Watcher overlap checks also recognise Docker bind aliases and nested filesystem mounts. A report folder exposed at both `/storage/reports` and another mounted path cannot be added as an inbox through the alternate path.
+
+
+## Sandboxed reader assets (1.1.3)
+
+A production PNG reproduction showed a logged-in top-level request returning
+`image/png`, while the opaque sandbox omitted the SameSite=Lax login cookie and
+received a login redirect. Chrome blocked the login HTML with ORB. The fix keeps
+login cookies, nosniff, MIME headers and opaque sandbox isolation unchanged.
+Private HTML entry requests now issue independent HMAC-signed, one-hour read-only
+view URLs under the existing `/share/` bypass. A view grants one retained package,
+not the library or API, creates no snapshot, and is invalidated by restart,
+expiry, deletion or pruning. The permanent reader link obtains a fresh view.
+
+The regression uses a real Lax-cookie authentication proxy and verifies cookie-free
+PNG/CSS/JS loading, private DOM/storage/API isolation, and PNGs in anonymous and
+password-protected snapshots. Backend tests cover scope/tampering, expired and
+restarted views, method restrictions, symlinks, package removal and raw keyed API
+responses. Temporary view URLs are bearer credentials; prefer permanent reader or
+explicit snapshot links when sharing. Portal does not log request URLs.

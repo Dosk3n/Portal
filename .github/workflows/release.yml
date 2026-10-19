@@ -52,6 +52,7 @@ jobs:
           node tests/refresh.cjs
           node tests/audit-regressions.cjs
           node tests/revisions.cjs
+          node tests/proxy-assets.cjs
       - name: Stop isolated app
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down

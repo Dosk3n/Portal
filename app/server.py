@@ -27,6 +27,7 @@ from watcher import Watcher
 from safe_files import open_regular
 
 STATIC=Path(__file__).parent/'static'
+READER_VIEW_SECONDS=3600
 SANDBOX="sandbox allow-scripts allow-forms allow-downloads allow-popups allow-modals; frame-ancestors 'self'"
 
 
@@ -38,6 +39,7 @@ class PortalServer(ThreadingHTTPServer):
         self.asset_version=hashlib.sha256(b''.join(
             path.read_bytes() for path in sorted(STATIC.rglob('*')) if path.is_file())).hexdigest()[:16]
         self.base_url=canonical_origin(base_url) if base_url else None
+        self.reader_secret=secrets.token_bytes(32)
         self.attempts={}
         self.attempt_lock=threading.Lock()
         self.upload_slots=threading.BoundedSemaphore(3)
@@ -60,6 +62,29 @@ class PortalServer(ThreadingHTTPServer):
     def process_request_thread(self,request,client_address):
         try: super().process_request_thread(request,client_address)
         finally: self.request_slots.release()
+
+    def reader_link(self, report_id, version, relative):
+        # Independent from the API key and login cookie. Scope every grant to
+        # one retained package and one hour; restarts invalidate existing grants.
+        expiry=int(time.time())+READER_VIEW_SECONDS
+        payload=f'{report_id}.{version}.{expiry}.{secrets.token_urlsafe(16)}'
+        signature=hmac.new(self.reader_secret,payload.encode(),hashlib.sha256).hexdigest()
+        return '/share/_reader/'+payload+'.'+signature+'/files/'+quote(relative,safe='/')
+
+    def reader_scope(self, ticket):
+        try:
+            if len(ticket)>256:raise ValueError
+            report_id,version,expires,nonce,signature=ticket.split('.')
+            if not identifier(report_id) or not identifier(version):raise ValueError
+            if not re.fullmatch(r'[A-Za-z0-9_-]{22}',nonce) or not re.fullmatch(r'[a-f0-9]{64}',signature):raise ValueError
+            expiry=int(expires)
+            payload='.'.join((report_id,version,expires,nonce))
+            expected=hmac.new(self.reader_secret,payload.encode(),hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(signature,expected) or not time.time()<expiry<=time.time()+READER_VIEW_SECONDS:
+                raise ValueError
+            return report_id,version
+        except (ValueError,TypeError):
+            raise LookupError('This report view has expired or is unavailable. Reopen it from the private library.') from None
 
     def trusted_host(self,host):
         if not host:return False
@@ -111,10 +136,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def error(self,status,message):
         path=urlsplit(self.path).path
-        public=path.startswith('/share/')
+        reader=path.startswith('/share/_reader/')
+        public=path.startswith('/share/') and not reader
         browser=self.command in {'GET','HEAD'} and not path.startswith(('/api','/internal/','/static/'))
         if public or browser:
-            title='Share unavailable' if public else 'Report unavailable' if path.startswith('/files/') else 'Page unavailable'
+            title='Report view unavailable' if reader else 'Share unavailable' if public else 'Report unavailable' if path.startswith('/files/') else 'Page unavailable'
             recovery='<a href="/" target="_top">Back to library</a>' if not public else ''
             token=path.split('/')[2] if public else ''
             if public and identifier(token) and status==403:
@@ -182,6 +208,8 @@ class Handler(BaseHTTPRequestHandler):
         if any(part in {'.','..'} for part in path.split('/')) or '\\' in path:
             return self.error(404,'Not found.')
         public=self.headers.get('X-Portal-Public')=='1'
+        if path.startswith('/share/_reader/'):
+            return self.reader_route(path)
         if path.startswith('/share/'):
             return self.share_route(path)
         if public:
@@ -210,7 +238,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/files/'):
                 parts=path.removeprefix('/files/').split('/',1)
                 if len(parts)!=2 or not identifier(parts[0]):raise LookupError('File not found.')
-                return self.report_file(parts[0],parts[1])
+                return self.report_file(parts[0],parts[1],reader=True)
             return self.error(404,'Not found.')
         lib=self.server.library
         if self.command in {'GET','HEAD'}:
@@ -275,13 +303,15 @@ class Handler(BaseHTTPRequestHandler):
         body=(STATIC/'index.html').read_bytes().replace(b'__ASSET_VERSION__',self.server.asset_version.encode())
         self.send(200,body,'text/html; charset=utf-8')
 
-    def report_file(self, report_id, relative):
+    def report_file(self, report_id, relative, reader=False):
         version=None
         if relative.startswith('versions/'):
             parts=relative.split('/',3)
             if len(parts)!=4 or parts[2]!='files' or not identifier(parts[1]):raise LookupError('File not found.')
             version=parts[1];relative=parts[3]
-        return self.file(self.server.library.package_path(report_id,version),relative,sandbox=True)
+        selected=self.server.library.version(report_id,version)['version']
+        return self.file(self.server.library.package_path(report_id,selected),relative,sandbox=True,
+                         reader_scope=(report_id,selected) if reader else None)
 
     def upload(self, report_id=None):
         if not self.server.upload_slots.acquire(blocking=False):return self.error(429,'Uploads are busy. Try again shortly.')
@@ -310,6 +340,15 @@ class Handler(BaseHTTPRequestHandler):
             self.json(self.server.library.import_report(payload,filename,metadata,report_id=report_id,
                       expected=self.headers.get('X-Report-Version')),201)
         finally:self.server.upload_slots.release()
+
+    def reader_route(self,path):
+        if self.command not in {'GET','HEAD'}:return self.error(405,'Method not allowed.')
+        parts=path.removeprefix('/share/_reader/').split('/',2)
+        if len(parts)!=3 or parts[1]!='files':raise LookupError('File not found.')
+        report_id,version=self.server.reader_scope(parts[0])
+        # Revalidate catalogue ownership on every request: deletion and pruning
+        # invalidate the view immediately, and paths cannot cross packages.
+        return self.file(self.server.library.package_path(report_id,version),parts[2],sandbox=True)
 
     def share_route(self,path):
         parts=path.removeprefix('/share/').split('/',1)
@@ -378,7 +417,7 @@ class Handler(BaseHTTPRequestHandler):
               '<button>Open report</button></form></main></html>')
         self.send(403 if failed else 200,body.encode(),'text/html; charset=utf-8')
 
-    def file(self,root,relative,sandbox=False):
+    def file(self,root,relative,sandbox=False,reader_scope=None):
         # Descriptor-relative opens reject links in every component, including
         # a directory index; keep the verified descriptor through the response.
         try:
@@ -392,6 +431,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             filename=stream.portal_filename
             mime=mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+            if reader_scope and self.command=='GET' and mime in {'text/html','application/xhtml+xml'}:
+                # Authenticate the initial document through the private route,
+                # then load all its relative dependencies without SameSite cookies.
+                entry=relative.rstrip('/')
+                if not entry or Path(entry).name!=filename:entry=(entry+'/' if entry else '')+filename
+                return self.send(302,headers={'Location':self.server.reader_link(*reader_scope,entry)})
             if mime.startswith('text/'):mime+='; charset=utf-8'
             size=os.fstat(stream.fileno()).st_size
             self.send_response(200)

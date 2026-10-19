@@ -52,7 +52,9 @@ class HTTPBoundaryTests(unittest.TestCase):
         self.assertEqual(status,404);self.assertNotIn(b'outside synthetic marker',body)
         (nested/'index.html').unlink();(nested/'index.html').write_text('<h1>Inside</h1>')
         status,headers,body=self.request(f"/files/{report['id']}/nested/")
-        self.assertEqual(status,200);self.assertIn('text/html',headers['Content-Type'])
+        self.assertEqual(status,302)
+        status,headers,body=self.request(headers['Location'],headers={'X-Portal-Public':'1'})
+        self.assertEqual(status,200);self.assertIn(b'Inside',body);self.assertIn('text/html',headers['Content-Type'])
         self.assertIn('sandbox',headers['Content-Security-Policy'])
 
     def test_public_snapshot_directory_index_cannot_follow_symlinks(self):

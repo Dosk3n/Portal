@@ -4,7 +4,7 @@ Personal HTML report library. Python standard library and SQLite; plain browser 
 
 - Keep application state in `/data` and report packages/snapshots in configured storage.
 - Public `/api/` routes always require the database API key. Browser routes use `/internal/` behind an authentication proxy; never expose the key to report HTML.
-- Render all report HTML with an opaque-origin sandbox, including private reports.
+- Render all report HTML with an opaque-origin sandbox, including private reports. Private HTML redirects to scoped, one-hour `/share/_reader/` views so packaged assets need no login cookies; keep the entire `/share/` prefix outside proxy login. Never put the API key in a view URL.
 - Manual/API submissions create a new report unless an explicit revision is requested. Revisions keep the report ID and retain the configured number of versions (default three total). Watched same-path identical content may be consumed as a visible duplicate skip only after verifying the existing package. Shares are independent snapshots, replaced only explicitly.
 - Watching is disabled by default. Consume input only after successful durable import; never watch managed storage or recursively follow symlinks.
 - Never commit runtime data, reports, credentials, or share tokens.

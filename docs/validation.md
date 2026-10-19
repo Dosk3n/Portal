@@ -15,6 +15,7 @@ node tests/browser.cjs
 node tests/refresh.cjs
 node tests/audit-regressions.cjs
 node tests/revisions.cjs
+node tests/proxy-assets.cjs
 ```
 
 Browser dependencies are temporary development tools and never enter the application image. Screenshots go to `/tmp/portal-browser` by default. Tests exercise manual ZIP upload, packaged images, script interaction, sandbox denial of private settings reads, public password entry and assets, keyed API upload, snapshot replacement preserving URL/password, key regeneration, folder settings, revocation, search, and a 390px mobile layout. Proxy access control and union/NAS behaviour require separate deployment checks.
@@ -26,3 +27,5 @@ The refresh regression test invokes the real 30-second poll callback directly. I
 The audit regression suite checks reader viewport height at four sizes and saves screenshots for visual review. It also checks mobile Open, filter persistence, reader return context, keyboard focus, settings fragment navigation, recoverable error routes, file picker activation, empty uploads, immediate share-list updates and report deletion preserving snapshots. Backend regressions cover missing assets, failed snapshots, expired password sessions and watcher duplicate recovery.
 
 The revision suite exercises HTML/ZIP revisions and assets, a stable reader link, version previews and restore, metadata edits, explicit snapshot refresh, retention confirmation/cancel/pruning, and reader layouts at four viewport sizes. Backend tests also cover in-place legacy migration, failed publication/pruning, concurrent stale updates, and version ownership.
+
+The proxy-assets browser regression runs a real login proxy with a SameSite=Lax cookie. It checks packaged PNG/CSS/JS with absent sandbox cookies, private DOM/storage/API isolation, public and password-protected snapshots, and login boundaries. Reader-view backend regressions cover scoped tokens, tampering, expiry, restart, deletion/pruning and raw keyed downloads.

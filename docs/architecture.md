@@ -37,3 +37,24 @@ After password entry, the sandboxed report and its relative assets use a session
 An archive is a report package, not a complete arbitrary website capture. Absolute local asset links, JavaScript-generated filesystem paths, missing files, private external embeds, and some module/storage APIs may need report author changes. A sandbox may require authors fetching packaged JSON to account for opaque-origin CORS. Folder scans are periodic to work with network mounts; stable-file heuristics cannot know whether a paused producer has finished. Prefer complete ZIPs or atomic publication into an inbox.
 
 Explicit revisions keep the report ID while publishing a new package and switching the catalogue/FTS pointer in one transaction. Existing installations register their original packages as version 1 without copying files or changing the API key. Private preview URLs pin the version so relative assets cannot mix across revisions. Restore copies a retained package into a new current version. The retention setting (three total by default) prunes old packages and their metadata after publication; shared snapshots remain independent. Metadata-only edits update the current details without copying assets. There is no offline cache, model execution, automatic research, scheduled share cleanup, or multi-instance coordination.
+
+
+## Private reader assets behind a login proxy
+
+Private HTML requests under `/files/` first pass the normal authentication proxy.
+After checking the requested file, Portal redirects the document to a one-hour,
+signed view URL under `/share/_reader/`. Its relative assets use that same URL
+prefix without relying on login cookies, which an opaque-origin sandbox can omit.
+The view is read-only, scoped to one report version, and is invalidated by expiry,
+server restart, report deletion or version pruning. It creates no shared snapshot.
+Reopening the permanent `/read/{id}` link issues fresh access. A long-open page
+can be refreshed when its view expires.
+
+The view URL is a temporary bearer credential, like an unlocked share session URL;
+use the permanent library link or an explicitly created share when sending links.
+It is never the API key. URLs are not logged by Portal, and view responses use
+`no-store`, `no-referrer`, the existing sandbox policy and MIME/nosniff headers.
+Keep the entire `/share/` route outside the login proxy, including `/_reader/`,
+while keeping `/files/`, `/internal/` and library pages protected. Do not weaken
+SameSite cookies, add `allow-same-origin`, or expose private file roots to solve
+asset loading. API file downloads continue to require the key and return raw data.

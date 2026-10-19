@@ -185,7 +185,7 @@ class RevisionTests(unittest.TestCase):
             code,body=request(path+'/versions','POST',package('Second'),**{'Content-Type':'application/zip','X-Report-Version':self.report['current_version']})
             self.assertEqual(code,201);updated=json.loads(body)
             self.assertEqual(request(path+'/versions')[0],200)
-            self.assertEqual(request(updated['url'],private=True)[0],200)
+            self.assertEqual(request(updated['url'],private=True)[0],302)
             self.assertEqual(request(path+'/files/index.html')[0],200)
             self.assertEqual(request(path+'/versions/'+self.id+'/files/image.svg')[0],200)
             self.assertEqual(request(path+'/versions','POST',package('Stale'),**{'Content-Type':'application/zip','X-Report-Version':self.id})[0],409)
